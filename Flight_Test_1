@@ -1,0 +1,63 @@
+//
+// INITALIZE VARIABLES
+//
+
+set countdown to 10. // launch countdown timer
+
+//
+// INITIALIZE FUNCTIONS
+//
+
+global function calculateDragPropotionalityConstant {
+
+    
+
+} 
+
+//
+// PRELAUNCH
+//
+
+sas off.
+lock steering to up.
+lock throttle to 0.0.
+
+//
+// COUNTDOWN 
+//
+
+// Note: since KSP does not simulate mechanical features or failures, this countdown is purely for flavor
+
+until countdown = 0 {
+    print "t - " + countdown at(0,0).
+    wait 1.
+    set countdown to countdown - 1.
+}
+
+//
+// INITAL CLIMB (Calculate trajectory by 2 km)
+//
+
+print "Liftoff!" at(0,0).
+lock throttle to 1.0.
+stage.
+
+until ship:altitude > 2000 {
+    
+}
+
+//
+// ROLL MANEUVER (Steer towards right heading by 2.5 km)
+//
+
+
+
+//
+// ORBITAL INSERTION (Get to orbit)
+//
+
+
+
+//
+// REENTRY (Measure drag proportionality constant,  Aim for ocean, Attempt a landing burn
+//
