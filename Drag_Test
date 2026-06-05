@@ -1,0 +1,49 @@
+// INITIALIZE VARIABELS
+
+set countdown to 20.  // launch countdown timer
+set t to 0.  // mission time variablle
+
+// Data collection lexicons. Pressure values are in kPA.
+set flight_dynamic_pressure to lexicon().
+set descent_dynamic_pressure to lexicon().
+set flight_pressure to lexicon().
+set descent_pressure to lexicon().
+
+// PRELAUNCH
+
+// Control steering and throttle
+sas off.
+lock steering to up.
+lock throttle to 0.0.
+
+// Countdown
+for i in countdown {
+    print "t - " + i at(0,0).
+    wait 1.
+}
+
+// Lock throttle to a value so that inital TWR = 1.5
+// F_thrust = TWR * mg
+lock throttle to 1.5 * ship:mass * 9.81 / ship:availablethrust.  // ship:mass is in tonnes and ship:available thrust is in kN, so the unit conversions cancel eachother out
+stage.
+print "Liftoff!" at(0,0).
+
+// DATA COLLECTION
+
+until ship:deltav:current < 5 {
+
+    // Read pressure sensors
+    flight_dynamic_pressuire:add(t, ship:q:atmtokpa).
+    flight_pressure:add(t, ship:sensors:pres).
+
+
+
+    wait 1.
+    set t to t + 1.
+} 
+
+// POST-FLIGHT
+
+lock throttle to 0.0.
+stage.
+
