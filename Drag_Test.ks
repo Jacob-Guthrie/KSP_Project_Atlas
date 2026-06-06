@@ -41,7 +41,7 @@ print "Liftoff!".
 
 // FLIGHT
 
-until ship:deltav:current < 5 {
+until ship:deltav:current < 10 {
     clearscreen.
     print "t + " + t.
 
