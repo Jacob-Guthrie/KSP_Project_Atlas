@@ -6,7 +6,7 @@ set countdown to 30.  // launch countdown timer
 set t to 0.  // mission time variablle
 
 // Data collection lexicons. Altitude values are in m above sea level, pressure values are in kPA, acceleration values are in g's
-set alt to lexicon().
+set altitude to lexicon().
 set flight_dynamic_pressure to lexicon().
 set descent_dynamic_pressure to lexicon().
 set flight_pressure to lexicon().
@@ -46,7 +46,7 @@ until ship:engines[0]:flameout {
     print "t + " + t.
 
     // Log altitude
-    alt:add(t, ship:altitude).
+    altitude:add(t, ship:altitude).
 
     // Read pressure sensors
     flight_dynamic_pressure:add(t, ship:q * constant:atmtokpa).
@@ -73,7 +73,7 @@ until ship:status = "landed" or ship:status = "splashed" {
     print "t + " + t.
 
     // Log altitude
-    alt:add(t, ship:altitude).
+    altitude:add(t, ship:altitude).
 
     // Read pressure sensors
     descent_dynamic_pressure:add(t, ship:q * constant:atmtokpa).
@@ -95,7 +95,7 @@ print "Landed!".
 // EXPORT DATA
 
 switch to 0.
-log alt to "altitude.txt".
+log altitude to "altitude.txt".
 log flight_dynamic_pressure to "flight_dynamic_pressure.txt".
 log flight_pressure to "flight_pressure.txt".
 log flight_acceleration to "flight_acceleration.txt".
