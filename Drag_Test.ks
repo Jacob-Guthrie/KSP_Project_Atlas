@@ -24,7 +24,7 @@ lock steering to up.
 lock throttle to 0.0.
 
 // Countdown
-until t = 0 {
+until countdown = 0 {
     print "t - " + countdown at(0,0).
     wait 1.
     set countdown to countdown - 1.
@@ -49,7 +49,7 @@ until ship:deltav:current < 5 {
 
     // Calculate expected acceleration if there is no drag:
     // a = 1/m * (F_thrust - F_gravity - dm/dt * v)
-    flight_expected_acceleration:add(t, 1/(ship:mass * 1000) * (ship:engines[0]:thrust * 1000 - ship:sensors:grav * 9.81 + ship:engines[0]:massflow * 1000 * ship:airspeed)).  //ship:mass is in Mg, ship:engines[0]:thrust is in kN, ship:sensors:grav is in g's, ship:massflow is in Mg/s
+    flight_expected_acceleration:add(t, 1/(ship:mass * 1000) * (ship:engines[0]:thrust * 1000 - ship:sensors:grav:mag * 9.81 + ship:engines[0]:massflow * 1000 * ship:airspeed)).  //ship:mass is in Mg, ship:engines[0]:thrust is in kN, ship:sensors:grav is in g's, ship:massflow is in Mg/s
 
     wait 1.
     set t to t + 1.
@@ -71,7 +71,7 @@ until ship:status = "landed" or ship:status = "splashed" {
 
     // Calculate expected acceleration if there is no drag:
     // a = 1/m * (F_gravity - dm/dt * v)
-    descent_expected_acceleration:add(t, 1/(ship:mass * 1000) * (ship:sensors:grav * 9.81 + ship:engines[0]:massflow * 1000 * ship:airspeed)).  //ship:mass is in Mg, ship:sensors:grav is in g's, ship:massflow is in Mg/s
+    descent_expected_acceleration:add(t, 1/(ship:mass * 1000) * (ship:sensors:grav:mag * 9.81 + ship:engines[0]:massflow * 1000 * ship:airspeed)).  //ship:mass is in Mg, ship:sensors:grav is in g's, ship:massflow is in Mg/s
 
     wait 1.
     set t to t + 1.
