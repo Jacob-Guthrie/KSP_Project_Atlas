@@ -2,10 +2,11 @@ wait until ship:unpacked.
 
 // INITIALIZE VARIABELS
 
-set countdown to 20.  // launch countdown timer
+set countdown to 30.  // launch countdown timer
 set t to 0.  // mission time variablle
 
-// Data collection lexicons. Pressure values are in kPA, acceleration values are in g's
+// Data collection lexicons. Altitude values are in m above sea level, pressure values are in kPA, acceleration values are in g's
+set alt to lexicon().
 set flight_dynamic_pressure to lexicon().
 set descent_dynamic_pressure to lexicon().
 set flight_pressure to lexicon().
@@ -25,7 +26,8 @@ lock throttle to 0.0.
 
 // Countdown
 until countdown = 0 {
-    print "t - " + countdown at(0,0).
+    clearscreen.
+    print "t - " + countdown.
     wait 1.
     set countdown to countdown - 1.
 }
@@ -34,20 +36,26 @@ until countdown = 0 {
 // F_thrust = TWR * mg
 lock throttle to 1.5 * ship:mass * 9.81 / ship:availablethrust.  // ship:mass is in Mg and ship:available thrust is in kN, so the unit conversions cancel eachother out
 stage.
-print "Liftoff!" at(0,0).
+clearscreen.
+print "Liftoff!".
 
 // FLIGHT
 
-until ship:deltav:current < 5 {
+until ship:engines[0]:flameout {
+    clearscreen.
+    print "t + " + t.
+
+    // Log altitude
+    alt:add(t, ship:altitude).
 
     // Read pressure sensors
     flight_dynamic_pressure:add(t, ship:q * constant:atmtokpa).
     flight_pressure:add(t, ship:sensors:pres).
 
     // Read accelerometer
-    flight_acceleration:add(t, ship:sensors:acc:mag).
+    flight_acceleration:add(t, ship:sensors:acc:mag * 9.81).  //sensors:acc
 
-    // Calculate expected acceleration if there is no drag:
+    // Calculate expected acceleration as if there is no drag:
     // a = 1/m * (F_thrust - F_gravity - dm/dt * v)
     flight_expected_acceleration:add(t, 1/(ship:mass * 1000) * (ship:engines[0]:thrust * 1000 - ship:sensors:grav:mag * 9.81 + ship:engines[0]:massflow * 1000 * ship:airspeed)).  //ship:mass is in Mg, ship:engines[0]:thrust is in kN, ship:sensors:grav is in g's, ship:massflow is in Mg/s
 
@@ -61,17 +69,22 @@ lock throttle to 0.0.
 stage.
 
 until ship:status = "landed" or ship:status = "splashed" {
+    clearscreen.
+    print "t + " + t.
+
+    // Log altitude
+    alt:add(t, ship:altitude).
 
     // Read pressure sensors
     descent_dynamic_pressure:add(t, ship:q * constant:atmtokpa).
     descent_pressure:add(t, ship:sensors:pres).
 
     // Read accelerometer
-    descent_acceleration:add(t, ship:sensors:acc:mag).
+    descent_acceleration:add(t, ship:sensors:acc:mag * 9.81).
 
-    // Calculate expected acceleration if there is no drag:
-    // a = 1/m * (F_gravity - dm/dt * v)
-    descent_expected_acceleration:add(t, 1/(ship:mass * 1000) * (ship:sensors:grav:mag * 9.81 + ship:engines[0]:massflow * 1000 * ship:airspeed)).  //ship:mass is in Mg, ship:sensors:grav is in g's, ship:massflow is in Mg/s
+    // Calculate expected acceleration as if there is no drag (mass is now constant):
+    // a = -F_gravity / m
+    descent_expected_acceleration:add(t, ship:sensors:grav:mag * -9.81 / (ship:mass * 1000)). //ship:mass is in Mg, ship:sensors:grav is in g's
 
     wait 1.
     set t to t + 1.
@@ -82,6 +95,7 @@ print "Landed!".
 // EXPORT DATA
 
 switch to 0.
+log alt to "altitude.txt".
 log flight_dynamic_pressure to "flight_dynamic_pressure.txt".
 log flight_pressure to "flight_pressure.txt".
 log flight_acceleration to "flight_acceleration.txt".
