@@ -41,7 +41,7 @@ print "Liftoff!" at(0,0).
 until ship:deltav:current < 5 {
 
     // Read pressure sensors
-    flight_dynamic_pressure:add(t, ship:q:atmtokpa).
+    flight_dynamic_pressure:add(t, ship:q * constant:atmtokpa).
     flight_pressure:add(t, ship:sensors:pres).
 
     // Read accelerometer
@@ -63,7 +63,7 @@ stage.
 until ship:status = "landed" or ship:status = "splashed" {
 
     // Read pressure sensors
-    descent_dynamic_pressure:add(t, ship:q:atmtokpa).
+    descent_dynamic_pressure:add(t, ship:q * constant:atmtokpa).
     descent_pressure:add(t, ship:sensors:pres).
 
     // Read accelerometer
