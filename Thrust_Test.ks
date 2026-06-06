@@ -1,0 +1,6 @@
+wait until ship:unpacked.
+
+// INITIALIZE VARIABLES
+
+
+/// TEST HOW CLOSE SHIP:THRUST IS TO SHIP:MAXTHRUSTAT(pressure) 
