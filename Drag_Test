@@ -24,9 +24,10 @@ lock steering to up.
 lock throttle to 0.0.
 
 // Countdown
-for i in countdown {
-    print "t - " + i at(0,0).
+until t = 0 {
+    print "t - " + countdown at(0,0).
     wait 1.
+    set countdown to countdown - 1.
 }
 
 // Lock throttle to a value so that inital TWR = 1.5
