@@ -41,7 +41,7 @@ print "Liftoff!".
 
 // FLIGHT
 
-until ship:engines[0]:flameout {
+until ship:delatv:current < 5 {
     clearscreen.
     print "t + " + t.
 
