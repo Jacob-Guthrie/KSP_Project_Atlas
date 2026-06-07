@@ -14,7 +14,8 @@ set countdown to 50. // Launch countdown timer
 
 global function calculateDragPropotionalityCoefficient {
     // Calculates the drag proportionality coefficient k in the equation F_drag = kPv^(2)/T where P is atmospheric pressure, T is temperature, and v is velocity.
-    // From Newton's Second law: F_drag = F_thrust - F_gravity - dp/dt where p is momentum.
+    // From Newton's Second law in one dimension: F_drag = - F_thrust - F_gravity * cos(theta) - 
+    
 } 
 
 //
