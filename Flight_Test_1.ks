@@ -84,7 +84,7 @@ global function measureDragPropotionalityCoefficient {
 
         // Measure acceleration
         measureDvdt().
-        descent_drag_coefficient_measurements:add(temp /  (pressure * ship:airspeed^2) * (F_gravity*cos(theta) - ship_mass*dvdt)).
+        descent_drag_coefficient_measurements:add(temp /  (pressure * ship:airspeed^2) * (F_gravity*cos(theta) - ship_mass*dvdt)).  // KOS trig functions take inputs in degrees
     }
 }
 
@@ -108,13 +108,13 @@ lock throttle to 1.0.
 clearscreen.
 print "Liftoff!".
 
-// Calculate trajectory by 2 km
+// Calculate drag coefficient 
 until ship:altitude > 2000 {
 
 }
 
 //
-// ROLL MANEUVER (Steer towards right heading by 2.5 km)
+//  ROLL PROGRAM
 //
 
 
