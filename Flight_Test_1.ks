@@ -18,7 +18,7 @@ set dmdt to 0.  // Maxium fuel outflow rate in kg/s
 lock ship_mass to ship:mass * 1000.  // Current ship mass in kg, ship:mass is in Mg
 lock temp to kerbin:atm:alttemp(ship:altitude).  // Predicited temperature in K
 lock pressure to ship:sensors:pres * 1000.  // Atmospheric pressure in Pa, sensors:pres is in kPa
-lock F_gravity to ship:mass * ship:sensors:grav:mag * 9.81.  // Magnitude of local gravity in N, sensors:grav is in g's
+lock F_gravity to kerbin:mu * ship_mass / (ship:altitude + kerbin:radius)^2. // Magnitude of local gravity in N
 lock F_thrust to ship:thrust * 1000.  // Magnitude of current ship thrust in N, ship:thrust is in kN
 
 set ascent_drag_coefficient_measurements to list().  // List of measured drag coeffcients during ascent
