@@ -4,24 +4,18 @@ Print "Beginning Flight Test 1".
 
 // Control steering and thrust
 sas off.
-lock steering to up.
-lock throttle to 0.0.
+lock steering to heading(90,90).
+lock throttle to 0.
 stage.
 
 //
 //  VARIABLES 
 //
 
+// Launch parameters
 set countdown to 50. // Launch countdown timer in s
-set dmdt to 0.  // Maxium fuel outflow rate in kg/s
-set dvdt to 0.  // Magnitude of acceleration in m/s^2
-
-lock ship_mass to ship:mass * 1000.  // Current ship mass in kg, ship:mass is in Mg
-lock temp to kerbin:atm:alttemp(ship:altitude).  // Predicited temperature in K
-lock pressure to ship:sensors:pres * 1000.  // Atmospheric pressure in Pa, sensors:pres is in kPa
-lock F_gravity to kerbin:mu * ship_mass / (ship:altitude + kerbin:radius)^2. // Magnitude of local gravity in N
-lock F_thrust to ship:thrust * 1000.  // Magnitude of current ship thrust in N, ship:thrust is in kN
-lock theta to ship:facing:pitch.  // Ship's pitch in degrees.
+set initial_TWR to 1.2.  // Inital TWR, dimensionless ratio
+set tgt_altitude to 80000.  // Target orbital altitude in m
 
 set ascent_drag_coefficient_measurements to list().  // List of measured drag coefficients during ascent
 set descent_drag_coefficient_measurements to list().  // List of measured drag coefficients during descent
@@ -33,6 +27,18 @@ for eng in ship:engines {
         booster_engines:add(eng).
     }
 }
+
+set dmdt to 0.  // Maxium fuel outflow rate in kg/s
+set dvdt to 0.  // Magnitude of acceleration in m/s^2
+set ascent_drag_coeff to 0. // Ascent drag proportionality constant, dimensionless
+set descent_drag_coeff to 0. // Descent drag proortionality constant, dimensionless
+
+lock ship_mass to ship:mass * 1000.  // Current ship mass is in kg, ship:mass is in Mg
+lock temp to kerbin:atm:alttemp(ship:altitude).  // Predicited temperature in K
+lock pressure to ship:sensors:pres * 1000.  // Atmospheric pressure in Pa, sensors:pres is in kPa
+lock F_gravity to kerbin:mu * ship_mass / (ship:altitude + kerbin:radius)^2. // Magnitude of local gravity in N
+lock F_thrust to ship:thrust * 1000.  // Magnitude of current ship thrust in N, ship:thrust is in kN
+lock theta to ship:prograde:pitch.  // Ship's pitch in degrees MIGHT NEED TO ADJUST FOR MEASUREMENT FROM VERTICAL
 
 //
 //  FUNCTIONS
@@ -59,13 +65,13 @@ global function measureDvdt {
     set dvdt to (ship:airspeed - ship_last_speed) / (time-timer):seconds.
 }
 
-global function measureDragPropotionalityCoefficient {
+global function measureDragCoefficient {
     // Calculates the drag proportionality coefficient k in the drag equation F_drag = kPv^(2)/T where P is atmospheric pressure, v is velocity, and T is temperature. k has unites of K * s^2
     
     // Ascent profile
     if ship:thrust > 0 {
         // From Newton's second law and the drag equation assuming a veritcal ascent:
-        // k = T/(PV^2) * (F_thrust - F_gravity - dm/dt*v - m*dv/dt)
+        // k = T/(PV^2) * (F_thrust - F_gravity*cos(theta) - dm/dt*v - m*dv/dt)
         // Note: use predicted temperature only and assume that it is always proportional to the real temperature
 
         // Measure mass outflow and acceleration
@@ -73,7 +79,7 @@ global function measureDragPropotionalityCoefficient {
         measureDvdt().
 
         // Calculate k
-        ascent_drag_coefficient_measurements:add(temp / (pressure * ship:airspeed^2) * (F_thrust - F_gravity - dmdt*ship:airspeed - ship_mass*dvdt)).
+        ascent_drag_coefficient_measurements:add(temp / (pressure * ship:airspeed^2) * (F_thrust - F_gravity*cos(theta) - dmdt*ship:airspeed - ship_mass*dvdt)).  // KOS trig functions take inputs in degrees
     }
 
     // Descent profile
@@ -88,6 +94,25 @@ global function measureDragPropotionalityCoefficient {
     }
 }
 
+global function averageDragCoefficient {
+    // Averages current drag coefficient measurements
+    parameter profile.
+    
+    if profile = "ascent" {
+        for i in ascent_drag_coefficient_measurements {
+            set ascent_drag_coeff to ascent_drag_coeff + ascent_drag_coefficient_measurements[i].  // Sums elements in list
+        }
+        set ascent_drag_coeff to ascent_drag_coeff / ascent_drag_coefficient_measurements:length.  // Divides by the length to complete the average
+    }
+
+    if profile = "descent" {
+        for i in descent_drag_coefficient_measurements {
+            set descent_drag_coeff to descent_drag_coeff + descent_drag_coefficient_measurements[i].  // Sum elements in list
+        }
+        set descent_drag_coeff to descent_drag_coeff / descent_drag_coefficient_measurements:length.  //Divides by the length to complete the average
+    }
+ }
+
 //
 //  PRELAUNCH
 //
@@ -101,30 +126,42 @@ until countdown = 0 {
 }
 
 //
-//  INITAL CLIMB
+//  INITIAL CLIMB
 //
 
-lock throttle to 1.0.
 clearscreen.
 print "Liftoff!".
 
-// Calculate drag coefficient 
-until ship:altitude > 2000 {
+// Initial vertical climb
+lock throttle to initial_TWR * F_gravity / (ship:maxthrust * 1000).  // Locks throttle to the desired TWR, ship:maxthrust is in kN
 
+// Make drag coefficient measurements periodically
+until ship:altitude > 200 {
+    measureDragCoefficient().
+    wait 1.
 }
 
 //
-//  ROLL PROGRAM
+//  ROLL PROGRAM and GRAVITY TURN
+// 
+
+// Set inital pitch from the vertical
+// Inital_theta = arccos(F_gravity * initial_TWR / F_maxthrust)
+set initial_theta to 90 - arcCos(F_gravity * initial_TWR / ship:maxthrust * 1000).  // ship:maxthrust is in kN
+lock steering to heading(90, initial_theta).  // Heading due east with desired pitch
+lock throttle to 1.
+
+// Lock steering to prograde once velocity has adjusted.
+wait until ship:prograde:pitch <= initial_theta.
+lock steering to ship:prograde.
+
+// Cut throttle when apoapsis reaches target orbital altitude
+wait until ship:obt:apoapsis > tgt_altitude.
+lock throttle to 0.
+
+//
+//  ORBITAL INSERTION
 //
 
-
-
-//
-// ORBITAL INSERTION (Get to orbit)
-//
-
-
-
-//
-// REENTRY (Measure drag proportionality constant,  Aim for ocean, Attempt a landing burn
-//
+// Coast until ship is in space
+wait until ship:altitude > 70000.
