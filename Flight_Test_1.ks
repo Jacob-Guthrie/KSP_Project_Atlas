@@ -6,7 +6,7 @@ Print "Beginning Flight Test 1".
 sas off.
 lock steering to heading(90,90).
 lock throttle to 0.
-stage.
+stage.  // Start booster engines
 
 //
 //  VARIABLES 
@@ -16,11 +16,11 @@ stage.
 set countdown to 50. // Launch countdown timer in s
 set initial_TWR to 1.2.  // Inital TWR, dimensionless ratio
 set tgt_altitude to 80000.  // Target orbital altitude in m
+set tgt_inclination to 0.  // Target orbital inclination in degrees
 
 set ascent_drag_coefficient_measurements to list().  // List of measured drag coefficients during ascent
 set descent_drag_coefficient_measurements to list().  // List of measured drag coefficients during descent
 set booster_engines to list().  // List of booster engines
-
 // Populate booster_engines list
 for eng in ship:engines {
     if eng:ignition {
@@ -32,6 +32,7 @@ set dmdt to 0.  // Maxium fuel outflow rate in kg/s
 set dvdt to 0.  // Magnitude of acceleration in m/s^2
 set ascent_drag_coeff to 0. // Ascent drag proportionality constant, dimensionless
 set descent_drag_coeff to 0. // Descent drag proortionality constant, dimensionless
+set tgt_obt_vel to sqrt(kerbin:mu / (kerbin:radius + tgt_altitude)).  // The orbital velocity in m/s based on target orbital altitude, kerbin:mu is in m^3s^-2
 
 lock ship_mass to ship:mass * 1000.  // Current ship mass is in kg, ship:mass is in Mg
 lock temp to kerbin:atm:alttemp(ship:altitude).  // Predicited temperature in K
@@ -130,13 +131,11 @@ until countdown = 0 {
 //  INITIAL CLIMB
 //
 
-stage.
+stage.  // Release tower clamps
 clearscreen.
 print "Liftoff!".
-
 // Initial vertical climb
 lock throttle to initial_TWR * F_gravity / (ship:maxthrust * 1000).  // Locks throttle to the desired TWR, ship:maxthrust is in kN
-
 // Make drag coefficient measurements periodically
 until ship:altitude > 200 {
     measureDragCoefficient().
@@ -147,22 +146,16 @@ until ship:altitude > 200 {
 //  ROLL PROGRAM and GRAVITY TURN
 // 
 
-// Set inital pitch from the vertical
-// Inital_theta = arccos(F_gravity * initial_TWR / F_maxthrust)
-set initial_theta to arcCos(F_gravity * initial_TWR / (ship:maxthrust * 1000)).  // ship:maxthrust is in kN
-print initial_theta.
-set counter to 0.
-lock steering to heading(90, 90 - initial_theta*counter).  // Heading due east with desired pitch
-until counter = 1 {
-    set counter to counter + 0.1.
-    wait 1.
-} 
+// Pitch 10 degrees from the vertical
+lock steering to heading(90,80).
+// Lock to surface prograde when velocity catches up
+wait until ship:srfprograde:pitch < 80.
+lock steering to ship:srfprograde.
+// Inital_theta = arccos(F_gravity * initial_TWR / F_maxthrust)  NOTE: this is the angle from the veritcal
+set initial_theta to arccos(F_gravity * initial_TWR / (ship:maxthrust * 1000)).  // ship:maxthrust is in kN
+// Wait until gravity turns to target pitch
+wait until ship:srfprograde:pitch < 90 - initial_theta.
 lock throttle to 1.
-
-// Lock steering to prograde once velocity has adjusted.
-wait until ship:prograde:pitch <= initial_theta.
-lock steering to ship:prograde.
-
 // Cut throttle when apoapsis reaches target orbital altitude
 wait until ship:obt:apoapsis > tgt_altitude.
 lock throttle to 0.
@@ -173,6 +166,5 @@ lock throttle to 0.
 
 // Coast until ship is in space
 wait until ship:altitude > 70000.
-
-switch to 0.
-log ascent_drag_coefficient_measurements to drag_measurements.txt.
+lock steering to ship:prograde.
+lock throttle to (tgt_altitude-ship:obt:apoapsis) / 5000. 
