@@ -120,7 +120,8 @@ global function averageDragCoefficient {
 // Countdown
 // Note: since KSP does not simulate mechanical features or failures, this countdown is purely for flavor
 until countdown = 0 {
-    print "T - " + countdown + "   " at (1,0).
+    print "T - " + countdown + "   " at (0,1).
+    print "" at (0,2).
     wait 1.
     set countdown to countdown - 1.
 }
@@ -129,6 +130,7 @@ until countdown = 0 {
 //  INITIAL CLIMB
 //
 
+stage.
 clearscreen.
 print "Liftoff!".
 
@@ -147,8 +149,14 @@ until ship:altitude > 200 {
 
 // Set inital pitch from the vertical
 // Inital_theta = arccos(F_gravity * initial_TWR / F_maxthrust)
-set initial_theta to 90 - arcCos(F_gravity * initial_TWR / ship:maxthrust * 1000).  // ship:maxthrust is in kN
-lock steering to heading(90, initial_theta).  // Heading due east with desired pitch
+set initial_theta to arcCos(F_gravity * initial_TWR / (ship:maxthrust * 1000)).  // ship:maxthrust is in kN
+print initial_theta.
+set counter to 0.
+lock steering to heading(90, 90 - initial_theta*counter).  // Heading due east with desired pitch
+until counter = 1 {
+    set counter to counter + 0.1.
+    wait 1.
+} 
 lock throttle to 1.
 
 // Lock steering to prograde once velocity has adjusted.
@@ -165,3 +173,6 @@ lock throttle to 0.
 
 // Coast until ship is in space
 wait until ship:altitude > 70000.
+
+switch to 0.
+log ascent_drag_coefficient_measurements to drag_measurements.txt.
