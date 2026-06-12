@@ -17,14 +17,17 @@ stage.  // Start booster engines
 set countdown to 50. // Launch countdown timer in s
 set initial_TWR to 1.2.  // Inital TWR, dimensionless ratio
 set tgt_altitude to 80000.  // Target orbital altitude in m
+set hover_slam_alt to 500.  // Altitude in m at which the hoverslam will begin
 
 set ascent_drag_coefficient_measurements to list().  // List of measured drag coefficients during ascent
 set descent_drag_coefficient_measurements to list().  // List of measured drag coefficients during descent
 set booster_engines to list().  // List of booster engines
-// Populate booster_engines list
+// Populate booster_engines list and measures max mass outflow rate
+set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s
 for eng in ship:engines {
     if eng:ignition {
         booster_engines:add(eng).
+        set max_mass_outflow to max_mass_outflow + eng:maxmassflow * 1000.  // maxmassflow is in Mg/s
     }
 }
 
@@ -32,6 +35,9 @@ set dmdt to 0.  // Maxium fuel outflow rate in kg/s
 set dvdt to 0.  // Magnitude of acceleration in m/s^2
 set ascent_drag_coeff to 0. // Ascent drag proportionality constant, dimensionless
 set descent_drag_coeff to 0. // Descent drag proortionality constant, dimensionless
+set slisp to ship:engines[0]:slisp.  // Sea level ISP in seconds, assumes that all booster engines have the same slisp
+set visp to ship:engines[0]:visp.  // Vacuum ISP in seconds, assumes that all booster engines have the same visp
+
 
 lock ship_mass to ship:mass * 1000.  // Current ship mass is in kg, ship:mass is in Mg
 lock temp to kerbin:atm:alttemp(ship:altitude).  // Predicited temperature in K
@@ -43,6 +49,13 @@ lock theta to ship:prograde:pitch.  // Ship's pitch in degrees MIGHT NEED TO ADJ
 //
 //   FUNCTIONS
 //
+
+global function lockTWR {
+    // Locks TWR to given input
+    parameter tgt_twr.
+
+    lock throttle to tgt_TWR * F_gravity / (ship:maxthrust * 1000).  // Locks throttle to the desired TWR, ship:maxthrust is in kN
+}
 
 global function measureDmdt {
     // Measures current mass outflow
@@ -111,9 +124,9 @@ global function averageDragCoefficient {
         }
         set descent_drag_coeff to descent_drag_coeff / descent_drag_coefficient_measurements:length.  //Divides by the length to complete the average
     }
- }
+}
 
- global function executeBurn {
+global function executeBurn {
     // Executes the given burn
     parameter burn_node.
     lock steering to burn_node:deltav.
@@ -122,13 +135,8 @@ global function averageDragCoefficient {
     // m_final = m_initial * e^(-deltaV / (Isp * g0))
     // m_final - m_initial / mass outflow rate = burn time in s
     set m_initial to ship_mass.
-    set visp to ship:engines[0]:visp.  // Vacuum ISP in seconds, assumes that all boosters have the same visp
-    set mass_outflow_rate to 0.
-    for i in booster_engines {
-        set mass_outflow_rate to mass_outflow_rate + booster_engines[i]:maxmassflow * 1000.  // maxmassflow is in Mg/s
-    }
     set m_final to m_initial * e^(-1*burn_node:deltav:mag / (visp * g0)).  // Expected mass at the end of the burn in kg
-    set burn_time to (m_final - m_initial) / mass_outflow_rate.  // Burn time in s
+    set burn_time to (m_final - m_initial) / max_mass_outflow.  // Burn time in s
 
     // Wait for burn time, then execute
     wait until ship:obt:eta:nextnode = (burn_time / 2).
@@ -141,7 +149,48 @@ global function averageDragCoefficient {
     lock throttle to 0.
     unlock steering.
     print "Burn complete.".
- }
+}
+
+global function landingBurn {
+    // Calculates ideal landing burn and performs a hoverslam
+
+    lock steering to ship:srfretrograde.
+    // Calculate the burn time using Tsiolkovsky's rocket equation
+    // m_final = m_initial * e^(-deltaV / (Isp * g0))
+    // m_final - m_initial / mass outflow rate = burn time in s
+    set m_initial to ship:mass.
+    lock m_final to m_initial * e^(-1*ship:airspeed / (slisp * g0)).  // Expected mass at the end of burn
+
+    // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
+    // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
+    lock impact_time to (ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude - hover_slam_alt))) / -9.81.
+    // Calculate time to negate ship:airspeed at sea level
+    lock landing_burn_time to (m_final - m_initial) / max_mass_outflow.
+
+    // Wait until landing burn then perform hoverslam
+    until impact_time > landing_burn_time {
+        measureDragCoefficient().
+        wait 1.
+    }
+    lock throttle to 1.
+    wait until ship:airspeed < 25.
+    set hover_throttle to 1.
+    set hover_pid to PIDloop(1,0.01,0.01,0,1).
+    set hover_pid:setpoint to 20.
+    lock throttle to hover_throttle.
+    until ship:altitude < 50 {
+        set hover_throttle to hover_pid:update(time:seconds, ship:airspeed).
+    }
+    set hover_pid:setpoint to 5.
+    lock steering to up.
+    until ship:altitude < 5 {
+        set hover_throttle to hover_pid:update(time:seconds, ship:airspeed).
+    }
+    lock throttle to 0.
+    print "Landed!".
+    unlock impact_time.
+    unlock landing_burn_time.
+}
 
 //
 //   PRELAUNCH
@@ -163,7 +212,7 @@ until countdown = 0 {
 clearscreen.
 print "Liftoff!".
 // Initial vertical climb
-lock throttle to initial_TWR * F_gravity / (ship:maxthrust * 1000).  // Locks throttle to the desired TWR, ship:maxthrust is in kN
+lock throttle to lockTWR(initial_TWR).
 stage.  // Release tower clamps
 // Make drag coefficient measurements periodically
 until ship:altitude > 200 {
@@ -189,6 +238,7 @@ lock throttle to 1.
 // Cut throttle when apoapsis reaches target orbital altitude
 wait until ship:obt:apoapsis > tgt_altitude.
 lock throttle to 0.
+print "MECO.".
 
 //
 //   ORBITAL INSERTION
@@ -213,6 +263,7 @@ executeBurn(obt_insertion_burn).
 lock steering to north.
 wait until vang(ship:facing:forevector, north:forevector) < 1.  // Waits until the ship is facing within 1 degree of normal
 stage.  // Deploy payload
+print "Payload deployed.".
 wait 5.
 
 //
@@ -227,5 +278,6 @@ wait until ship:obt:periapsis < 33000.
 lock throttle to 0.
 lock steering to ship:srfretrograde.
 wait until ship:altitude < 70000.
-
-// Measure drag coefficients on the way down and attempt a suicide burn
+landingBurn().
+switch to 0.
+log descent_drag_coefficient_measurements to "drag_coeff.txt".
