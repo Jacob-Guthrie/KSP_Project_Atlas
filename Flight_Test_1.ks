@@ -145,9 +145,9 @@ global function landingBurn {
     }
     lock throttle to 1.
     wait until ship:airspeed < 25.
-    lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 - 1) * F_gravity / (ship:maxthrust * 1000))).  // Find out why this locked at 28.3 m/s instead of 20.
+    lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity / (ship:maxthrust * 1000))).
     wait until ship:altitude < 50.
-    lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 - 1) * F_gravity / (ship:maxthrust * 1000))).
+    lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity / (ship:maxthrust * 1000))).
     lock steering to up.
     wait until ship:altitude < 5.
     lock throttle to 0.
