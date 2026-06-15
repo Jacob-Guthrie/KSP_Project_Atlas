@@ -5,6 +5,7 @@ Print "Beginning Flight Test 1".
 
 // Control steering and thrust
 sas off.
+rcs off.
 lock steering to heading(90,90).
 lock throttle to 0.
 stage.  // Start booster engines
@@ -14,12 +15,11 @@ stage.  // Start booster engines
 //
 
 // Launch parameters
-set countdown to 5. // Launch countdown timer in s
-set initial_TWR to 1.4.  // Inital TWR, dimensionless ratio
+set countdown to 10. // Launch countdown timer in s
+set initial_TWR to 1.1.  // Inital TWR, dimensionless ratio
 set tgt_altitude to 80000.  // Target orbital altitude in m
 set hover_slam_alt to 500.  // Altitude in m at which the hoverslam will begin
 
-set ascent_drag_coefficient_measurements to list().  // List of measured drag coefficients during ascent
 set descent_drag_coefficient_measurements to list().  // List of measured drag coefficients during descent
 set booster_engines to list().  // List of booster engines
 // Populate booster_engines list and measures max mass outflow rate
@@ -33,11 +33,9 @@ for eng in ship:engines {
 
 set dmdt to 0.  // Maxium fuel outflow rate in kg/s
 set dvdt to 0.  // Magnitude of acceleration in m/s^2
-set ascent_drag_coeff to 0. // Ascent drag proportionality constant, dimensionless
 set descent_drag_coeff to 0. // Descent drag proortionality constant, dimensionless
 set slisp to ship:engines[0]:slisp.  // Sea level ISP in seconds, assumes that all booster engines have the same slisp
 set visp to ship:engines[0]:visp.  // Vacuum ISP in seconds, assumes that all booster engines have the same visp
-
 
 lock ship_mass to ship:mass * 1000.  // Current ship mass is in kg, ship:mass is in Mg
 lock temp to kerbin:atm:alttemp(ship:altitude).  // Predicited temperature in K
@@ -45,17 +43,13 @@ lock pressure to ship:sensors:pres * 1000.  // Atmospheric pressure in Pa, senso
 lock F_gravity to kerbin:mu * ship_mass / (ship:altitude + kerbin:radius)^2. // Magnitude of local gravity in N
 lock F_thrust to ship:thrust * 1000.  // Magnitude of current ship thrust in N, ship:thrust is in kN
 lock theta to vang(ship:up:forevector, ship:srfprograde:forevector).  // The angle between the ship's surface prograde and the vertical in degrees
+lock TWR_throttle to min(1, max(0, tgt_TWR * F_gravity / (ship:maxthrustat(ship:altitude) * 1000))).  // Creates a throttle setting that locks to a specific TWR, will stay in the bounds [0,1], ship:maxthrust is in kN
+lock vert_TWR_throttle to min(1, max(0, tgt_TWR * F_gravity / (ship:maxthrustat(ship:altitude) * 1000 * abs(cos(theta))))).  // Creates a throttle setting that locks to a TWR accounting only for the vertical component of thrust, will stay in the bounds [0,1], ship:maxthrust is in kN
+
 
 //
 //   FUNCTIONS
 //
-
-global function lockTWR {
-    // Locks TWR to given input
-    parameter tgt_twr.
-
-    lock throttle to tgt_TWR * F_gravity / (ship:maxthrust * 1000).  // Locks throttle to the desired TWR, ship:maxthrust is in kN
-}
 
 global function measureDmdt {
     // Measures current mass outflow
@@ -79,51 +73,23 @@ global function measureDvdt {
 }
 
 global function measureDragCoefficient {
-    // Calculates the drag proportionality coefficient k in the drag equation F_drag = kPv^(2)/T where P is atmospheric pressure, v is velocity, and T is temperature. k has unites of K * s^2
-    
-    // Ascent profile
-    if ship:thrust > 0 {
-        // From Newton's second law and the drag equation assuming a veritcal ascent:
-        // k = T/(PV^2) * (F_thrust - F_gravity*cos(theta) - dm/dt*v - m*dv/dt)
-        // Note: use predicted temperature only and assume that it is always proportional to the real temperature
-
-        // Measure mass outflow and acceleration
-        measureDmdt().
-        measureDvdt().
-
-        // Calculate k
-        ascent_drag_coefficient_measurements:add(temp / (pressure * ship:airspeed^2) * (F_thrust - F_gravity*abs(cos(theta)) - dmdt*ship:airspeed - ship_mass*dvdt)).  // KOS trig functions take inputs in degrees
-    }
-
+    // Calculates the drag proportionality coefficient k in the drag equation F_drag = kPv^(2)/T where P is atmospheric pressure, v is velocity, and T is temperature. k has unites of K * s^2   
     // Descent profile
-    else {
-        // From Newton's second law and the drag equation, where theta represents the pitch angle from the vertical:
-        // k = T/(PV^2) * (F_gravity*cos(theta) - m*dv/dt)
-        // Note: use predicted temperature only and assume that it is always proportional to the real temperature
+    // From Newton's second law and the drag equation, where theta represents the pitch angle from the vertical:
+    // k = T/(PV^2) * (F_gravity*cos(theta) - m*dv/dt)
+    // Note: use predicted temperature only and assume that it is always proportional to the real temperature
 
-        // Measure acceleration
-        measureDvdt().
-        descent_drag_coefficient_measurements:add(temp /  (pressure * ship:airspeed^2) * (F_gravity*abs(cos(theta)) - ship_mass*dvdt)).  // KOS trig functions take inputs in degrees
-    }
+    // Measure acceleration
+    measureDvdt().
+    descent_drag_coefficient_measurements:add(temp /  (pressure * ship:airspeed^2) * (F_gravity*abs(cos(theta)) - ship_mass*dvdt)).  // KOS trig functions take inputs in degrees
 }
 
 global function averageDragCoefficient {
     // Averages current drag coefficient measurements
-    parameter profile.
-    
-    if profile = "ascent" {
-        for i in ascent_drag_coefficient_measurements {
-            set ascent_drag_coeff to ascent_drag_coeff + ascent_drag_coefficient_measurements[i].  // Sums elements in list
-        }
-        set ascent_drag_coeff to ascent_drag_coeff / ascent_drag_coefficient_measurements:length.  // Divides by the length to complete the average
+    for i in descent_drag_coefficient_measurements {
+        set descent_drag_coeff to descent_drag_coeff + descent_drag_coefficient_measurements[i].  // Sum elements in list
     }
-
-    if profile = "descent" {
-        for i in descent_drag_coefficient_measurements {
-            set descent_drag_coeff to descent_drag_coeff + descent_drag_coefficient_measurements[i].  // Sum elements in list
-        }
-        set descent_drag_coeff to descent_drag_coeff / descent_drag_coefficient_measurements:length.  //Divides by the length to complete the average
-    }
+    set descent_drag_coeff to descent_drag_coeff / descent_drag_coefficient_measurements:length.  //Divides by the length to complete the average
 }
 
 global function executeBurn {
@@ -179,7 +145,7 @@ global function landingBurn {
     }
     lock throttle to 1.
     wait until ship:airspeed < 25.
-    lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 - 1) * F_gravity / (ship:maxthrust * 1000))).
+    lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 - 1) * F_gravity / (ship:maxthrust * 1000))).  // Find out why this locked at 28.3 m/s instead of 20.
     wait until ship:altitude < 50.
     lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 - 1) * F_gravity / (ship:maxthrust * 1000))).
     lock steering to up.
@@ -200,35 +166,33 @@ global function landingBurn {
 until countdown = 0 {
     print "T - " + countdown + "   " at (0,1).
     set countdown to countdown - 1.
+    wait 1.
 }
 
 //
 //   INITIAL CLIMB
 //
 
-clearscreen.
-print "Liftoff!".
 // Initial vertical climb
 set initial_throttle to initial_TWR * F_gravity / (ship:maxthrust * 1000). 
 set g_turn_throttle to initial_throttle.
 lock throttle to g_turn_throttle.
 stage.  // Release tower clamps
-// Make drag coefficient measurements periodically
-until ship:altitude > 200 {
-    measureDragCoefficient().
-    wait 1.
-}
+clearscreen.
+print "Liftoff!".
+wait until ship:altitude > 200.
 
 //
 //   ROLL PROGRAM and GRAVITY TURN
 // 
 
-// Crude gravity turn, optimize in future
+// Crude gravity turn code, optimize in future
 // Inital_theta = arccos(F_gravity * initial_TWR / F_maxthrust)  NOTE: this is the angle from the veritcal
 set initial_theta to arccos(F_gravity * initial_TWR / (ship:maxthrust * 1000)).  // ship:maxthrust is in kN
 print "Initial_theta = " + initial_theta.
 lock steering to heading (90,85).
-wait until vang(ship:srfprograde:forevector, up:forevector) > 5.
+wait 1.
+wait until vang(ship:srfprograde:forevector, up:forevector) < 1.
 lock steering to ship:srfprograde.
 set g_turn_throttle to initial_TWR * F_gravity / (ship:maxthrust * 1000). 
 lock throttle to g_turn_throttle.
