@@ -16,7 +16,10 @@ stage.  // Start booster engines
 
 // Flight parameters
 set countdown to 10.  // Countdown timer in s
+set tgt_twr to 1.1.  // Target TWR, dimensionless ratio
 
+lock F_gravity to kerbin:mu * ship:mass * 1000 / (kerbin:radius+ship:altitude)^2 * ship:body:position:normalized.  // A vector representing the current force of gravity in m/s^2
+lock twr_throttle to min(1, max(0, tgt_twr * F_gravity:mag / ship:maxthrustat(kerbin:atm:altitudepressure(ship:altitude)))).  // A throttle ratio [0,1] that provides target TWR
 
 //
 //   Functions
