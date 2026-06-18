@@ -16,7 +16,7 @@ stage.  // Start booster engines
 //
 
 // Flight parameters
-set countdown to 10.  // Countdown timer in s
+set countdown to 5.  // Countdown timer in s
 set tgt_twr to 1.1.  // Target TWR, dimensionless ratio
 set tgt_alt to 80000.  // Target orbital altitude in m
 
@@ -39,17 +39,18 @@ for eng in ship:engines {
 //
 
 function F_thrust {
-    // Returns the vector of thrust from a given throttle and position vector
+    // Returns the vector of thrust from a given throttle and position vector in the direction of velocity
     parameter throttle_arg.  // Throttle %
     parameter position_arg.  // Position vector in m
-    return throttle_arg * ship:maxthrustat(kerbin:atm:altitudepressure(position_arg:mag-kerbin:radius)) * 1000 * ship:facing:forevector:normalized.  // Thrust vector in N
+    parameter velocity_arg.  // Velocity vector in m/s
+    return throttle_arg * ship:maxthrustat(kerbin:atm:altitudepressure(position_arg:mag-kerbin:radius)) * 1000 * velocity_arg:normalized.  // Thrust vector in N
 }
 
 function F_gravity {
     // Returns the vector of gravity from a given mass and position vector using Newton's law of gravity
     parameter mass_arg.  // Mass in kg
     parameter position_arg.  // Position vector in m
-    return kerbin:mu * mass_arg / (position_arg:mag)^2 * kerbin:postion:normalized.  // Gravity vector in N
+    return kerbin:mu * mass_arg / (position_arg:mag)^2 * position_arg:normalized.  // Gravity vector in N
 }
 
 function F_drag {
@@ -61,8 +62,8 @@ function F_drag {
     // Calculate pressure and temperature
     declare pressure to kerbin:atm:altitudepressure(position_arg:mag - kerbin:radius).  // Pressure in atm
     declare temperature to kerbin:atm:alttemp(position_arg:mag - kerbin:radius).  // Temperature in K
-
-    return k * pressure * velocity_arg:mag^2 / temperature * ship:srfretrograde:forevector:normalized.  // Drag vector in N  
+    print "Drag force: " + (k * pressure * velocity_arg:mag^2 / temperature * -1*velocity_arg:normalized):mag.
+    return k * pressure * velocity_arg:mag^2 / temperature * -1*velocity_arg:normalized.  // Drag vector in N 
 }
 
 function F_net {
@@ -71,8 +72,7 @@ function F_net {
     parameter position_arg.  // Position vector in m
     parameter velocity_arg.  // Velocity vector in m/s
     parameter mass_arg.  // Mass in kg
-    parameter k.  // Drag constant in K*kg/(atm*m)
-    return F_thrust(throttle_arg, position_arg) + F_gravity(mass_arg, position_arg) + F_drag(k, position_arg, velocity_arg).  // Net force vector in N
+    return F_thrust(throttle_arg, position_arg, velocity_arg) + F_gravity(mass_arg, position_arg) + F_drag(drag_constant, position_arg, velocity_arg).  // Net force vector in N
 }
 
 function momentum {
@@ -95,7 +95,7 @@ function measureDragConstant {
     declare dpdt to (momentum(ship:mass*1000, ship:obt:velocity:surface) - last_momentum) / (time - timer):seconds.
 
     // Measure drag and calculate drag constant
-    declare measured_drag to dpdt - F_thrust(throttle, kerbin:position) - F_gravity(ship:mass * 1000, kerbin:positon).
+    declare measured_drag to dpdt - F_thrust(throttle, kerbin:position, ship:obt:velocity:surface) - F_gravity(ship:mass * 1000, kerbin:position).
     declare k to measured_drag:mag * kerbin:atm:alttemp(ship:altitude) / (kerbin:atm:altitudepressure(ship:altitude) * ship:airspeed^2).
 
     if profile = "ascent" {
@@ -107,73 +107,109 @@ function measureDragConstant {
 }
 
 function integrateFlightPath {
-    // Calculates flight trajectory using the 4th order runge-kutta method
-    // dr/dt = -v ; r(0) = kerbin:positon:mag
-    // dv/dt = 1/m * (F_net - dm/dt * v) ; v(0) = ship:alt
+    // Calculates flight trajectory using the 4th order Runge-Kutta method
  
-    function massFunc {
+    local function massFunc {
         // Models mass as a function of time
-        parameter t.  // Time in s
-        return try_throttle * max_mass_outflow * t + initial_mass.  // Mass in kg
+        parameter t_arg.  // Time in s
+        return try_throttle * max_mass_outflow * t_arg + initial_mass.  // Mass in kg
     }
-   
-    // Average drag constants
-    set drag_constant to 0.
-    for i in ascent_profile_drag_constants {
-        set drag_constant to drag_constant + ascent_profile_drag_constants[i].
-    }
-    set drag_constant to drag_constant / ascent_profile_drag_constants:length.
-    print "Drag constant: " + drag_constant.
-    // DEBUG SECTION
-    log ascent_profile_drag_constants to "ascent_drag_constants.txt".
-    print "Drag measurements logged.".
-    // END DEBUG SECTION
 
-    set try_throttle to 1.
+    local function drdt {
+        // Differential equation modelling kerbin's position vector
+        // dr/dt = -v ; r(0) = kerbin:position:mag
+        parameter velocity_arg.
+        return -1 * velocity_arg. 
+    }
+
+    local function dvdt {
+        // Differential equation modelling the ship's velocity vector
+        // dv/dt = (F_net - dm/dt * v) / m ; v(0) = ship:alt
+        parameter t_arg.
+        parameter position_arg.
+        parameter velocity_arg.
+        return (F_net(try_throttle, position_arg, velocity_arg, massFunc(t_arg)) - dmdt * velocity_arg) / massFunc(t_arg).
+    }
+
+    declare try_throttle to 1.
     set pos_list to list().
     set vel_list to list().
+    declare initial_mass to 0.
+    declare dmdt to 0.
 
-    until condition {  // Until flight path predicts a flatish trajectory at 30000 m altitude
-
+    until false {
+        // This loop tries different throttle settings until it finds one that provides the desired trajectory
         pos_list:clear().
         vel_list:clear().
 
-        // Inital conditions
-        set n to 1.  // Index variable
-        set step to .02.  // KSP tries to do a physics tick every .02 seconds for a total of 50 times a second
-        set t to 0.  // Elapsed time in s
+        // Parameters
+        declare n to 0.  // Index
+        declare t to 0.  // Elapsed time in s
+        declare step to 1.  // KSP tries to do a physics tick every .02 seconds for a total of 50 times a second
         set initial_mass to ship:mass * 1000.  // Mass in kg
         set dmdt to try_throttle * max_mass_outflow.  // Change in mass with respect to time in kg/s
 
         // Get the ship's surface velocity and change its direction
-        set initial_vel to ship:obt:velocity:surface.
+        declare initial_vel to ship:obt:velocity:surface.
         set initial_vel:direction to heading(90,85).
 
-        pos_list:add(kerbin:position).  // Position vector in m
-        vel_list:add(initial_vel).  // Surface velocity vector in m/s
+        // Inital conditions
+        pos_list:add(kerbin:position).
+        vel_list:add(initial_vel).
 
-        until condition { // Until altitude reaches 30000 m
+        // Apply Runge-Kutta method for given conditions until the calculated trajectory reaches 30 km
+        until pos_list[n]:mag - kerbin:radius > 30000 {
+            print "Loop #: " + (n+1).
+            // drdt = f(vel)
+            // dvdt = f(t,pos,vel)
+            declare pos_k1 to drdt(vel_list[n]).
+            declare vel_k1 to dvdt(t, pos_list[n], vel_list[n]).
+
+            declare pos_k2 to drdt(vel_list[n]+vel_k1*step/2).
+            declare vel_k2 to dvdt(t+step/2, pos_list[n]+pos_k1*step/2, vel_list[n]+vel_k1*step/2).
+
+            declare pos_k3 to drdt(vel_list[n]+vel_k2*step/2).
+            declare vel_k3 to dvdt(t+step/2, pos_list[n]+pos_k2*step/2, vel_list[n]+vel_k2*step/2).
+
+            declare pos_k4 to drdt(vel_list[n]+vel_k3*step).
+            declare vel_k4 to dvdt(t+step, pos_list[n]+pos_k3*step, vel_list[n]+vel_k3*step).
+
             // Iterate
-            set pos_k1 to -1 * vel_list[n-1].
-            set vel_k1 to (F_net(try_throttle, pos_list[n-1], vel_list[n-1], massFunc(t), drag_constant) - dmdt * vel_list[n-1]) / massFunc(t).
-
-            set pos_k2 to -1 * vel_list[n-1]*step/2*vel_k1.
-            set vel_k2 to (F_net(try_throttle, pos_list[n-1]*step/2*pos_k1, vel_list[n-1]*step/2*vel_k1, massFunc(t+step/2), drag_constant) - dmdt * vel_list[n-1]*step/2*vel_k1) / massFunc(t+step/2).
-
+            pos_list:add(pos_list[n] + step/6 * (pos_k1 + 2*pos_k2 + 2*pos_k3 + pos_k4)).
+            vel_list:add(vel_list[n] + step/6 * (vel_k1 + 2*vel_k2 + 2*vel_k3 + vel_k4)).
+            set t to t + step.
             set n to n + 1.
-        }   
 
-        if long {
-            set try_throttle to try_throttle / 2. 
-        }
-        if short {
+            // Break if altitude ever drops
+            if pos_list[n]:mag < pos_list[n-1]:mag {
+                break.
+            }
+        } 
+        // Check that the trajectory ends with a pitch between 5 and 15 degrees (FINE TUNE LATER)
+        declare theta to vang(pos_list[n], vel_list[n]).
+        if theta > 95 AND theta < 105 {
+            // Success! Return try_throttle and begin gravity turn
+            print "Success!".
+            print "Altitude: " + pos_list[n]:mag - kerbin:radius.
+            print "Theta: " + theta.
+            print "Throttle: " + try_throttle.
+            return try_throttle.  
+        } else if theta > 105 {
+            // Throttle too high
+            print "Theta: " + theta.
+            set try_throttle to try_throttle / 2.
+            print "Trying throttle: " + try_throttle.
+        } else {
+            // Throttle too low
+            print "Theta: " + theta.
             set try_throttle to try_throttle + (1 - try_throttle) / 2.
+            print "Trying throttle: " + try_throttle.
         }
     }
 }
 
-
-lock twr_throttle to min(1, max(0, tgt_twr * F_gravity(ship:mass * 1000, ship:altitude) / ship:maxthrustat(kerbin:atm:altitudepressure(ship:altitude)))).  // A throttle ratio [0,1] that provides target TWR
+print "TWR_THROTTLE: " + tgt_twr * F_gravity(ship:mass * 1000, kerbin:position):mag / (ship:maxthrustat(kerbin:atm:altitudepressure(ship:altitude))*1000) at(0,3).
+lock twr_throttle to min(1, max(0, tgt_twr * F_gravity(ship:mass * 1000, kerbin:position):mag / (ship:maxthrustat(kerbin:atm:altitudepressure(ship:altitude)) * 1000))).  // A throttle ratio [0,1] that provides target TWR
 
 //
 //   Flight Program
@@ -192,14 +228,34 @@ lock throttle to twr_throttle.
 stage.
 clearscreen.
 print "Liftoff!".
+wait 2.
 
 // Vertical Ascent
 until ship:altitude > 300 {
     measureDragConstant("ascent").
     wait 1.
 }
+// Average drag constants
+set drag_constant to 0.
+for i in ascent_profile_drag_constants {
+    set drag_constant to drag_constant + i.
+}
+set drag_constant to drag_constant / ascent_profile_drag_constants:length.
+print "Drag constant: " + drag_constant.
+log ascent_profile_drag_constants to "ascent_drag_constants.txt".
+print "Drag measurements logged.".
+until ship:altitude > 1000 {
+    F_drag(drag_constant, kerbin:position, ship:obt:velocity:surface).
+}
 
-// Roll program
+// Roll program and gravity turn
+set tgt_throttle to integrateFlightPath().
 lock steering to heading(90,85).
 wait until vang(heading(90,85):forevector, ship:srfprograde:forevector) < 0.5.
+lock throttle to tgt_throttle.
 lock steering to ship:srfprograde.
+
+wait until ship:altitude > 30000.
+lock throttle to 1.
+wait until ship:obt:apoapsis > tgt_alt.
+lock throttle to 0.
