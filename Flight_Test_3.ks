@@ -17,7 +17,8 @@ stage.  // Start booster engines
 
 // Flight parameters
 set tgt_altitude to 80000.  // Target orbital altitude in m
-set tgt_twr to 1.1.  // Initial takeoff TWR\
+set tgt_twr to 1.1.  // Initial takeoff TWR
+set hover_slam_alt to 250.  // Altitude in m at which the hoverslam will begin
 
 // Lists
 set booster_engines to list().  // List of booster engines
@@ -41,7 +42,7 @@ function F_gravity {
     return kerbin:mu * mass_arg / (position_arg:mag)^2 * position_arg:normalized.
 }
 
-function countdown {
+function countdownTimer {
     // Performs a countdown. Note: since KSP does not simulate mechanical features or failures, this countdown is purely for flavor
     parameter countdown.  // Countdown timer in s
 
@@ -91,7 +92,7 @@ function executeBurn {
     // Throttle down at end of burn
     wait burn_time - 1.
     set remaining_burn to burn_node:deltav:mag.
-    lock throttle to constant:e^(burn_node:deltav:mag - remaining_burn).
+    lock throttle to burn_node:deltav:mag / remaining_burn.
     wait until burn_node:deltav:mag < 2.
     lock throttle to 0.
     rcs off.
@@ -128,7 +129,45 @@ function deployPayload {
 }
 
 function deorbit {
-    
+    // Performs a deorbiting burn
+
+    rcs on.
+    lock steering to ship:retrograde.
+    wait until vang(ship:facing:forevector, ship:retrograde:forevector) < 0.5.
+    lock throttle to 0.5.
+    wait until ship:obt:periapsis < 37000.
+    lock throttle to 0.
+}
+
+function landingBurn {
+    // Controls attitude during atmospheric rentry and performs a landing burn
+
+    rcs on.
+    lock steering to ship:srfretrograde.
+    lock m_initial to ship:mass * 1000.
+
+    // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
+    // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
+    // 0 = y_0 - v_y * t - 1/2 * g * t^2
+    lock impact_time to (-1*ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude - ship:geoposition:terrainheight - hover_slam_alt))) / -9.81.
+
+    // Calculate the burn time to negate speed using Tsiolkovsky's rocket equation
+    // m_final = m_initial * e^(-deltaV / (Isp * g0))
+    // m_final - m_initial / mass outflow rate = burn time in s
+    lock landing_burn_time to ((m_initial * constant:e^(-1*ship:airspeed / (booster_engines[0]:slisp * 9.81))) - m_initial) / max_mass_outflow.
+
+    wait until impact_time < landing_burn_time.
+    // Locks throttle to target velocity of 20 m/s
+    lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity / (ship:maxthrust * 1000))).
+    rcs off.
+    wait until ship:altitude - ship:geoposition:terrainheight < 50.
+    // Locks throttle to target velocity of 5 m/s
+    lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity / (ship:maxthrust * 1000))).
+    lock steering to up.
+    wait until ship:altitude - ship:geoposition:terrainheight < 5.
+    lock throttle to 0.
+    wait 1.
+    print "Landed!".
 }
 
 lock twr_throttle to min(1, max(0, tgt_twr * F_gravity(ship:mass * 1000, kerbin:position):mag / (ship:maxthrustat(kerbin:atm:altitudepressure(ship:altitude)) * 1000))).  // A throttle ratio [0,1] that provides target TWR
@@ -138,7 +177,7 @@ lock T_max to ship:maxthrustat(kerbin:atm:altitudepressure(ship:altitude))*1000.
 //   Flight Program
 //
 
-countdown(5).
+countdownTimer(5).
 // Launch
 lock throttle to twr_throttle.
 stage.
@@ -147,5 +186,7 @@ gravityTurn(2).
 wait until ship:altitude > 70000.
 stage.  // Deploy payload fairing
 orbitalInsertion().
-deployPayload().
+//deployPayload().
 deorbit().
+wait until ship:altitude < 70000.
+landingBurn().
