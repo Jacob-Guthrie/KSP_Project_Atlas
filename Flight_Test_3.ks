@@ -31,6 +31,8 @@ for eng in ship:engines {
     }
 }
 
+set launchpad to ship:geoposition.
+
 //
 //   Functions
 //
@@ -87,7 +89,7 @@ function executeBurn {
     set burn_time to (m_final - m_initial) / max_mass_outflow.  // Burn time in s
 
     // Execute
-    wait until nextnode:eta < (burn_time / 2).
+    wait until nextnode:eta < (burn_time / 2) AND vang(ship:facing:forevector, burn_node:deltav) < 1.
     lock throttle to 1.
     // Throttle down at end of burn
     wait burn_time - 1.
@@ -101,7 +103,7 @@ function executeBurn {
 }
 
 function orbitalInsertion {
-    // Inserts the ship into a roughly circular orbit at apoapsis
+    // Calculates and executes the maneuver node for insertion into a roughly circular orbit at apoapsis
 
     // Calculate velocity at apoapsis using conservation of energy
     // v_final = sqrt(v_inital^2 + 2*kerbin:mu*(1/r_initial - 1/r_final))
@@ -126,6 +128,19 @@ function deployPayload {
     stage.  // Deploy payload decoupler
     unlock steering.
     rcs off.
+}
+
+function atmosphericReentry {
+    // Calculates and executes the maneuver node that sets the booster on a return trajectory
+
+
+}
+
+function calculateReturnTrajectory {
+    // Calculates the the time elapsed and angle rotated during return trajectory TEST AIRBRAKES
+    // Uses the 4th order Runge-Kutta method to model the return trajectory for the booster
+
+
 }
 
 function deorbit {
@@ -187,6 +202,7 @@ wait until ship:altitude > 70000.
 stage.  // Deploy payload fairing
 orbitalInsertion().
 //deployPayload().
+//atmosphericReentry().
 deorbit().
 wait until ship:altitude < 70000.
 landingBurn().
