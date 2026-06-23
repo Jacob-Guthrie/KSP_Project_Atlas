@@ -1,6 +1,6 @@
 // Initialize
 wait until ship:unpacked.
-ship:partstitled("Probodobodyne OKTO2")[0]:controlfrom().
+ship:partstitled("RC-001S Remote Guidance Unit")[0]:controlfrom().
 clearscreen.
 Print "Beginning Flight Test 3".
 switch to 0.
@@ -18,7 +18,7 @@ stage.  // Start booster engines
 // Flight parameters
 set tgt_altitude to 80000.  // Target orbital altitude in m
 set tgt_twr to 1.1.  // Initial takeoff TWR
-set hover_slam_alt to 250.  // Altitude in m at which the hoverslam will begin
+set hover_slam_alt to 1000.  // Altitude in m at which the hoverslam will begin
 
 // Lists
 set booster_engines to list().  // List of booster engines
@@ -93,9 +93,11 @@ function executeBurn {
     lock throttle to 1.
     // Throttle down at end of burn
     wait burn_time - 1.
-    set remaining_burn to burn_node:deltav:mag.
-    lock throttle to burn_node:deltav:mag / remaining_burn.
-    wait until burn_node:deltav:mag < 2.
+    lock steering to ship:facing:forevector.
+    //set remaining_burn to burn_node:deltav:mag.
+    //lock throttle to burn_node:deltav:mag / remaining_burn.
+    //wait until burn_node:deltav:mag < 2.
+    wait 1.
     lock throttle to 0.
     rcs off.
     unlock steering.
@@ -147,37 +149,45 @@ function deorbit {
     // Performs a deorbiting burn
 
     rcs on.
-    lock steering to ship:retrograde.
+    unlock steering.
+    sas on.
+    wait 1.
+    set sasmode to "RETROGRADE".
     wait until vang(ship:facing:forevector, ship:retrograde:forevector) < 0.5.
     lock throttle to 0.5.
-    wait until ship:obt:periapsis < 37000.
+    wait until ship:obt:periapsis < 51000.
     lock throttle to 0.
+    sas off.
+    rcs off.
 }
 
 function landingBurn {
     // Controls attitude during atmospheric rentry and performs a landing burn
 
-    rcs on.
-    lock steering to ship:srfretrograde.
+    brakes on.
+    unlock steering.
+    rcs off.
     lock m_initial to ship:mass * 1000.
 
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
     // 0 = y_0 - v_y * t - 1/2 * g * t^2
-    lock impact_time to (-1*ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude - ship:geoposition:terrainheight - hover_slam_alt))) / -9.81.
+    lock impact_time to (-1*ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude - hover_slam_alt))) / -9.81.
 
     // Calculate the burn time to negate speed using Tsiolkovsky's rocket equation
     // m_final = m_initial * e^(-deltaV / (Isp * g0))
     // m_final - m_initial / mass outflow rate = burn time in s
     lock landing_burn_time to ((m_initial * constant:e^(-1*ship:airspeed / (booster_engines[0]:slisp * 9.81))) - m_initial) / max_mass_outflow.
-
+    clearscreen.
+    print "Impact time: " + impact_time.
+    print "Burn time: " + landing_burn_time.
     wait until impact_time < landing_burn_time.
     // Locks throttle to target velocity of 20 m/s
-    lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity / (ship:maxthrust * 1000))).
-    rcs off.
+    lock steering to ship:srfretrograde.
+    lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity(ship:mass*1000, kerbin:position):mag / (ship:maxthrust * 1000))).
     wait until ship:altitude - ship:geoposition:terrainheight < 50.
     // Locks throttle to target velocity of 5 m/s
-    lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity / (ship:maxthrust * 1000))).
+    lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity(ship:mass*1000, kerbin:position):mag / (ship:maxthrust * 1000))).
     lock steering to up.
     wait until ship:altitude - ship:geoposition:terrainheight < 5.
     lock throttle to 0.
@@ -199,10 +209,13 @@ stage.
 print "Liftoff!" at (0,1).
 gravityTurn(2).
 wait until ship:altitude > 70000.
+unlock steering.
 stage.  // Deploy payload fairing
 orbitalInsertion().
 //deployPayload().
 //atmosphericReentry().
 deorbit().
+rcs on.
+lock steering to ship:srfretrograde.
 wait until ship:altitude < 70000.
 landingBurn().
