@@ -39,9 +39,25 @@ set launchpad to ship:geoposition.
 
 function F_gravity {
     // Returns the gravity force vector in N from a given mass and position vector using Newton's law of gravity
-    parameter mass_arg.  // Mass in kg
-    parameter position_arg.  // Position vector in m
+    // F_gravity = mu * m/r^2
+    parameter position_arg.  // Kerbin osition vector in m
+    parameter mass_arg.  // ship mass in kg
     return kerbin:mu * mass_arg / (position_arg:mag)^2 * position_arg:normalized.
+}
+
+function F_drag {
+    // Returns the drag force vector in N from a given velocity and position using Ferram Aerospace's formula
+    parameter position_arg.  // Kerbin position vector in m
+    parameter velocity_arg.  // Ship velocity vector in m/s
+
+    declare ship_altitude to position_arg:mag - kerbin:radius.  // Ship's altitude in m
+    // Copy the velocity_arg vector and modify its direction for the purposes of the aeroforceat() method.
+    declare modified_vel to velocity_arg:vec.
+    set modified_vel:direction to ship:facing:inverse.
+
+    declare drag to addons:far:aeroforceat(ship_altitude, modified_vel) * 1000.  // Drag force magnitude in N
+    declare drag_vector to drag * -1 * velocity_arg:normalized.  // Drag vector in N
+    return drag_vector.
 }
 
 function countdownTimer {
@@ -53,6 +69,17 @@ function countdownTimer {
     set countdown to countdown - 1.
     wait 1.
     }
+}
+
+function burnMass {
+    // Returns the required propellant mass required for a given burn using Tsiolkovsky's rockey equation
+    // m_final = m_initial * e^(-deltaV / (Isp * g0))
+    parameter deltav.  // Delta-v in m/s
+    parameter isp.  // Specific impulse in s
+    parameter m_initial.  // Initial mass in kg
+
+    declare m_final to m_initial * constant:e^(-1 * deltav / (isp * 9.81)).
+    return m_initial - m_final.
 }
 
 function gravityTurn {
@@ -81,23 +108,19 @@ function executeBurn {
     rcs on.
     lock steering to burn_node:deltav.
     
-    // Calculate the burn time of the node using Tsiolkovsky's rocket equation
-    // m_final = m_initial * e^(-deltaV / (Isp * g0))
-    // m_final - m_initial / mass outflow rate = burn time in s
-    set m_initial to ship:mass*1000.
-    set m_final to m_initial * constant:e^(-1*burn_node:deltav:mag / (booster_engines[0]:visp * 9.81)).  // Expected mass at the end of the burn in kg
-    set burn_time to (m_final - m_initial) / max_mass_outflow.  // Burn time in s
+    // Calculate burn time in seconds
+    // burn time = - burn mass (kg) / mass outflow (kg/s)
+    set burn_time to -1 * burnMass(burn_node:deltav:mag, booster_engines[0]:visp, ship:mass * 1000) / max_mass_outflow.
 
-    // Execute
+    // Execute burn
     wait until nextnode:eta < (burn_time / 2) AND vang(ship:facing:forevector, burn_node:deltav) < 1.
     lock throttle to 1.
-    // Throttle down at end of burn
+
+    // Lock steering to prevent oscilation at end of burn
     wait burn_time - 1.
     lock steering to ship:facing:forevector.
-    //set remaining_burn to burn_node:deltav:mag.
-    //lock throttle to burn_node:deltav:mag / remaining_burn.
-    //wait until burn_node:deltav:mag < 2.
     wait 1.
+
     lock throttle to 0.
     rcs off.
     unlock steering.
@@ -132,17 +155,19 @@ function deployPayload {
     rcs off.
 }
 
-function atmosphericReentry {
-    // Calculates and executes the maneuver node that sets the booster on a return trajectory
-
-
-}
-
 function calculateReturnTrajectory {
-    // Calculates the the time elapsed and angle rotated during return trajectory TEST AIRBRAKES
+    // Calculates the the time elapsed and angle rotated during return trajectory, then creates a maneuver node
     // Uses the 4th order Runge-Kutta method to model the return trajectory for the booster
 
-
+    // Use the vis-viva equation to determine the deltav of a deorbiting burn targeting a periapsis of 50km
+    // v^2 = mu * (2/r - 1/a)
+    // a = (2*body radius + apoapsis + periapsis)/2
+    declare semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis + 50000) / 2.
+    declare deorbit_vel to sqrt(kerbin:mu * (2/kerbin:position:mag * 1/semimajor_axis)).  // The velocity required to deorbit
+    declare avg_vel to sqrt(kerbin:mu / ship:semimajoraxis).  // The average velocity of the current orbit
+    declare deltav to avg_vel - deorbit_vel.  // The delta-v for a deorbiting burn
+    
+    // Calculate the mass remaining after the given burn using Tsiolkovsky's rocket equation
 }
 
 function deorbit {
@@ -150,7 +175,7 @@ function deorbit {
 
     rcs on.
     unlock steering.
-    sas on.
+    sas on.  // Using SAS mode makes the ship pitch faster
     wait 1.
     set sasmode to "RETROGRADE".
     wait until vang(ship:facing:forevector, ship:retrograde:forevector) < 0.5.
@@ -167,20 +192,15 @@ function landingBurn {
     brakes on.
     unlock steering.
     rcs off.
-    lock m_initial to ship:mass * 1000.
 
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
     // 0 = y_0 - v_y * t - 1/2 * g * t^2
     lock impact_time to (-1*ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude - hover_slam_alt))) / -9.81.
 
-    // Calculate the burn time to negate speed using Tsiolkovsky's rocket equation
-    // m_final = m_initial * e^(-deltaV / (Isp * g0))
-    // m_final - m_initial / mass outflow rate = burn time in s
-    lock landing_burn_time to ((m_initial * constant:e^(-1*ship:airspeed / (booster_engines[0]:slisp * 9.81))) - m_initial) / max_mass_outflow.
-    clearscreen.
-    print "Impact time: " + impact_time.
-    print "Burn time: " + landing_burn_time.
+    // Calculate the burn time to negate air speed.
+    lock landing_burn_time to -1 * burnMass(ship:airspeed, booster_engines[0]:slisp, ship:mass * 1000) / max_mass_outflow.
+
     wait until impact_time < landing_burn_time.
     // Locks throttle to target velocity of 20 m/s
     lock steering to ship:srfretrograde.
@@ -212,8 +232,6 @@ wait until ship:altitude > 70000.
 unlock steering.
 stage.  // Deploy payload fairing
 orbitalInsertion().
-//deployPayload().
-//atmosphericReentry().
 deorbit().
 rcs on.
 lock steering to ship:srfretrograde.
