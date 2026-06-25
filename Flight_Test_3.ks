@@ -90,7 +90,7 @@ function timeToBurn {
     parameter isp.  // Specific impulse in s
     parameter m_initial.  // Initial mass in kg
 
-    declare m_final to massAfterBurn(deltav, isp, m_initial).
+    local m_final to massAfterBurn(deltav, isp, m_initial).
     return (m_final - m_initial) / max_mass_outflow.
 }
 
@@ -110,7 +110,7 @@ function gravityTurn {
     local lock theta to vang(heading(90,0):forevector, ship:srfprograde:forevector).
     local lock tgt_theta to 88 * constant:e^(-0.05723 * ship:altitude / 1000).
     lock throttle to min(1, max(0.05,-1/10 * (theta-tgt_theta) + 1)).
-     wait until ship:obt:apoapsis > tgt_altitude.
+    wait until ship:obt:apoapsis > tgt_altitude.
     lock throttle to 0.
     rcs on.
     wait until ship:altitude > 70000.
@@ -189,9 +189,9 @@ function calculateReturnTrajectory {
     // Use the vis-viva equation to determine the deltav of a deorbiting burn targeting a periapsis of 50km
     // v^2 = mu * (2/r - 1/a)
     // a = (2*body radius + apoapsis + periapsis)/2
-    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis + 50000) / 2.
-    local deorbit_vel to sqrt(kerbin:mu * (2/kerbin:position:mag * 1/deorbit_semimajor_axis)).  // The velocity required to deorbit
-    local current_avg_vel to sqrt(kerbin:mu / ship:semimajoraxis).  // The average velocity of the current orbit
+    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 50000) / 2.
+    local deorbit_vel to sqrt(kerbin:mu * (2/kerbin:position:mag - 1/deorbit_semimajor_axis)).  // The velocity required to deorbit
+    local current_avg_vel to sqrt(kerbin:mu / ship:obt:semimajoraxis).  // The average velocity of the current orbit
     local deltav to current_avg_vel - deorbit_vel.  // The delta-v for a deorbiting burn
 
     clearscreen.
