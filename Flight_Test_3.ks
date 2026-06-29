@@ -57,7 +57,7 @@ function F_drag {
     local modified_vel to velocity_arg:vec.
     set modified_vel:direction to ship:facing:inverse.
 
-    local drag to addons:far:aeroforceat(ship_altitude, modified_vel) * 1000.  // Drag vector in N
+    local drag to addons:far:aeroforceat(ship_altitude, modified_vel) * 1000 * 3.5.  // Drag vector in N
     set drag:direction to velocity_arg:direction:inverse.  // Rotate the vector to oppose the velocity argument
     return drag.
 }
@@ -134,11 +134,9 @@ function executeBurn {
     local burn_time to timeToBurn(burn_node:deltav:mag, booster_engines[0]:visp, ship:mass * 1000).
     // Execute burn
     wait until nextnode:eta < (burn_time / 2).
-    lock throttle to 1.
-    // Lock steering to prevent oscilation at end of burn
-    wait burn_time - 1.
     lock steering to ship:facing:forevector.
-    wait 1.
+    lock throttle to 1.
+    wait burn_time.
     lock throttle to 0.
 
     // Release control
@@ -204,7 +202,7 @@ function calculateReturnTrajectory {
     // Parameters
     local n to 0.  // Index
     local t to 0.  // Time in s
-    local step to 0.02.  // KSP tries to do a physics update 50 times a second.
+    local step to 1.  // KSP tries to do a physics update 50 times a second.
 
     // Inital conditions
     local m_final to massAfterBurn(deltav, booster_engines[0]:visp, ship:mass * 1000).
@@ -293,6 +291,22 @@ function calculateReturnTrajectory {
     executeBurn(deorbit_burn).
 }
 
+function deorbit {
+    // Use the vis-viva equation to determine the deltav of a deorbiting burn targeting a periapsis of 50km
+    // v^2 = mu * (2/r - 1/a)
+    // a = (2*body radius + apoapsis + periapsis)/2
+    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 50000) / 2.
+    local deorbit_vel to sqrt(kerbin:mu * (2/kerbin:position:mag - 1/deorbit_semimajor_axis)).  // The velocity required to deorbit
+    local current_avg_vel to sqrt(kerbin:mu / ship:obt:semimajoraxis).  // The average velocity of the current orbit
+    local deltav to current_avg_vel - deorbit_vel.  // The delta-v for a deorbiting burn
+
+    wait 10.
+    // Create a maneuver node and execute
+    local deorbit_burn to node(timespan(0,0,0,4,0), 0, 0, -1*deltav).
+    add deorbit_burn.
+    executeBurn(deorbit_burn).
+}
+
 function landingBurn {
     // Controls attitude during atmospheric rentry and performs a hoverslam on the launchpad
 
@@ -305,6 +319,7 @@ function landingBurn {
     wait until ship:altitude < 70000.
     unlock steering.
     rcs off.
+    sas off.
 
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
@@ -317,16 +332,15 @@ function landingBurn {
     // Slow down at the given altitude
     clearscreen.
     print "Reentry Program".
-    local t to 0.
+    local cd_lex to lexicon().  // A list of drag coefficients keyed by airspeed
     until impact_time < burn_time {
-        print "Impact_time: " + impact_time + "  " at(0,1).
-        print "Burn_time: " + burn_time + "  " at(0,2).
-        print "Expected altitude: " + (pos_list[t*50]:mag - kerbin:radius) at(0,4).
-        print "Expected orbital velocity: " + (vel_list[t*50]:mag) at(0,5).
-
-        set t to t + 1.
-        wait 1.
+        if not cd_lex:haskey(round(ship:airspeed)) and mod(ship:airspeed,5) < 0.1 {
+            // If the ship's airspeed is close to a multiple of 5, document drag coefficient
+            cd_lex:add(round(ship:airspeed), addons:far:cd).
+        }
+        wait 0.
     }
+    writeJson(cd_lex, "cd_lex.json").
     lock steering to ship:srfretrograde.
     // Locks throttle to target velocity of 20 m/s
     lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
@@ -363,7 +377,5 @@ stage.  // Deploy payload fairing
 clearscreen.
 print "Payload fairing separation.".
 orbitalInsertion().
-deployPayload().
-calculateReturnTrajectory().
-wait until ship:altitude < 72000.
+deorbit().
 landingBurn().
