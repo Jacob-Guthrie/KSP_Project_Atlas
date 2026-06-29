@@ -20,10 +20,12 @@ set tgt_altitude to 80000.  // Target orbital altitude in m
 set tgt_twr to 1.1.  // Initial takeoff TWR
 set hover_alt to 2000.  // Altitude in m at which the hoverslam will begin
 
-set launchpad to ship:geoposition.
+set launchpad to ship:geoposition.  // Geocoordinates structure to help navigation back to launchpad
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s, calculated when booster_engines list is created. Note: value is always negative
+set c_drag to 3.2.  // Average dimensionless drag coefficent used as an initial value
 
-// Lists
+// Lists and lexicons
+set cd_lex to readJson("cd_lex.json").
 set booster_engines to list().  // List of booster engines
 // Populate booster_engines list and measure max mass outflow rate
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s
@@ -66,12 +68,10 @@ function F_drag {
     local air_vel to 2 * constant:pi * position_arg:mag / kerbin:rotationperiod * heading(90,0):forevector.
     local relative_vel to velocity_arg - air_vel.
 
-    // Get drag coefficient lexicon and lookup FIX THIS
-    local cd_lex to readJson("cd_lex.json").
-    if not cd_lex:haskey(round(relative_vel:mag)) {
-        return  * velocity_arg.  // Returns zero vector if there is a gap in the lexicon
+    // Update drag coefficient if cd_lex has a value
+    if cd_lex:haskey(round(relative_vel:mag)) {
+        set c_drag to cd_lex[round(relative_vel:mag)].
     }
-    local c_drag to cd_lex[round(relative_vel:mag)].
 
     // Cross sectional reference area in m^2, specific to booster
     local ref_area to 11.262.
@@ -273,9 +273,6 @@ function calculateReturnTrajectory {
         set t to t+step.
         set n to n+1.
     }
-
-    // Release brakes
-    brakes off.
 
     // Calculate angle the ship rotated around Kerbin
     local ship_theta to vang(pos_list[0], pos_list[n]).
