@@ -18,7 +18,7 @@ stage.  // Start booster engines
 // Flight parameters
 set tgt_altitude to 80000.  // Target orbital altitude in m
 set tgt_twr to 1.1.  // Initial takeoff TWR
-set hover_alt to 5000.  // Altitude in m at which the hoverslam will begin
+set hover_alt to 2000.  // Altitude in m at which the hoverslam will begin
 
 set launchpad to ship:geoposition.
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s, calculated when booster_engines list is created. Note: value is always negative
@@ -48,18 +48,35 @@ function F_gravity {
 }
 
 function F_drag {
-    // Returns the drag force vector in N from a given velocity and position using Ferram Aerospace's formula
+    // Returns the drag force vector (for descent) in N from a given velocity and position using the drag equation
+    // F_drag = 0.5 * rho * v^2 * c_drag * A
+    // Density (rho) = pressure / (287.053 * temperature)
     parameter position_arg.  // Kerbin position vector in m
     parameter velocity_arg.  // Ship velocity vector in m/s
 
-    local ship_altitude to position_arg:mag - kerbin:radius.  // Ship's altitude in m
-    // Copy the velocity_arg vector and modify its direction for the purposes of the aeroforceat() method.
-    local modified_vel to velocity_arg:vec.
-    set modified_vel:direction to ship:facing:inverse.
+    // Calculate atmospheric density
+    local ship_alt to position_arg:mag - kerbin:radius.
+    if kerbin:atm:alttemp(ship_alt) = 0 {
+        return 0 * velocity_arg.  // Returns zero vector if ship is outside atmosphere
+    }
+    local density to kerbin:atm:altitudepressure(ship_alt) * constant:atmtokpa * 1000 / (287.053 * kerbin:atm:alttemp(ship_alt)).  // Density in kg/m^3
 
-    local drag to addons:far:aeroforceat(ship_altitude, modified_vel) * 1000 * 3.5.  // Drag vector in N
-    set drag:direction to velocity_arg:direction:inverse.  // Rotate the vector to oppose the velocity argument
-    return drag.
+    // Calculate velocity relative to air
+    // V_air = 2 * pi * r / kerin:rotationperiod
+    local air_vel to 2 * constant:pi * position_arg:mag / kerbin:rotationperiod * heading(90,0):forevector.
+    local relative_vel to velocity_arg - air_vel.
+
+    // Get drag coefficient lexicon and lookup FIX THIS
+    local cd_lex to readJson("cd_lex.json").
+    if not cd_lex:haskey(round(relative_vel:mag)) {
+        return  * velocity_arg.  // Returns zero vector if there is a gap in the lexicon
+    }
+    local c_drag to cd_lex[round(relative_vel:mag)].
+
+    // Cross sectional reference area in m^2, specific to booster
+    local ref_area to 11.262.
+
+    return 0.5 * density * relative_vel:mag^2 * c_drag * ref_area * -1 * relative_vel:normalized.
 }
 
 function countdownTimer {
@@ -181,9 +198,6 @@ function calculateReturnTrajectory {
     // Calculates the return trajectory and executes a precise deorbiting burn
     // Uses the 4th order Runge-Kutta method to model the return trajectory for the booster
 
-    // Deploy airbrakes for the purpose of calculating drag
-    brakes on.
-
     // Use the vis-viva equation to determine the deltav of a deorbiting burn targeting a periapsis of 50km
     // v^2 = mu * (2/r - 1/a)
     // a = (2*body radius + apoapsis + periapsis)/2
@@ -231,8 +245,12 @@ function calculateReturnTrajectory {
     until pos_list[n]:mag - kerbin:radius < hover_alt {
         // Readout
         print "Loop #: " + (n+1) at(0,6).
-        print "Pos mag: " + pos_list[n]:mag + " " at(0,7).
+        print "Alt: " + (pos_list[n]:mag - kerbin:radius) + " " at(0,7).
         print "Vel mag: " + vel_list[n]:mag + " " at(0,8).
+        print "F_gravity: " + F_gravity(pos_list[n], m_final):mag + " " at (0,9).
+        print "F_drag: " + F_drag(pos_list[n], vel_list[n]):mag + "                                        " at (0,10).
+        print "Gravity angle: " + vang(F_gravity(pos_list[n], m_final),vel_list[n]) + " " at(0,11).
+        print "Drag angle: " + vang(F_drag(pos_list[n], vel_list[n]), vel_list[n]) + " " at(0,12).
 
         // drdt = f(vel)
         // dvdt = f(pos, vel)
@@ -319,7 +337,6 @@ function landingBurn {
     wait until ship:altitude < 70000.
     unlock steering.
     rcs off.
-    sas off.
 
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
@@ -332,15 +349,7 @@ function landingBurn {
     // Slow down at the given altitude
     clearscreen.
     print "Reentry Program".
-    local cd_lex to lexicon().  // A list of drag coefficients keyed by airspeed
-    until impact_time < burn_time {
-        if not cd_lex:haskey(round(ship:airspeed)) and mod(ship:airspeed,5) < 0.1 {
-            // If the ship's airspeed is close to a multiple of 5, document drag coefficient
-            cd_lex:add(round(ship:airspeed), addons:far:cd).
-        }
-        wait 0.
-    }
-    writeJson(cd_lex, "cd_lex.json").
+    wait until impact_time < burn_time.
     lock steering to ship:srfretrograde.
     // Locks throttle to target velocity of 20 m/s
     lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
@@ -377,5 +386,5 @@ stage.  // Deploy payload fairing
 clearscreen.
 print "Payload fairing separation.".
 orbitalInsertion().
-deorbit().
+calculateReturnTrajectory().
 landingBurn().
