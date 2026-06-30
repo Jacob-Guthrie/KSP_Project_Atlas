@@ -280,7 +280,8 @@ function calculateReturnTrajectory {
     }
 
     // Calculate angle the ship rotated around Kerbin
-    local ship_theta to vang(pos_list[0], pos_list[n]).
+    // NOTE: the ship will rotate more than 180 degrees due to the shallow reentry profile so vang() will return the absolute value of the negative coterminal angle
+    local ship_theta to 360 - vang(pos_list[0], pos_list[n]).
 
     // Calculate the angle Kerbin rotates during the time elapsed
     // t(s) * 360 (deg) / rotation_period (s) = angle rotated in degrees
