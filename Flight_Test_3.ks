@@ -25,7 +25,7 @@ set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s, calculated whe
 set c_drag to 3.2.  // Average dimensionless drag coefficent used as an initial value
 
 // Lists and lexicons
-set cd_lex to readJson("cd_lex.json").
+set cd_list to readJson("cd_list.json").
 set booster_engines to list().  // List of booster engines
 // Populate booster_engines list and measure max mass outflow rate
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s
@@ -65,18 +65,21 @@ function F_drag {
 
     // Calculate velocity relative to air
     // V_air = 2 * pi * r / kerin:rotationperiod
-    local air_vel to 2 * constant:pi * position_arg:mag / kerbin:rotationperiod * heading(90,0):forevector.
-    local relative_vel to velocity_arg - air_vel.
+    //local air_vel to 2 * constant:pi * position_arg:mag / kerbin:rotationperiod * heading(90,0):forevector.
+    //local relative_vel to velocity_arg - air_vel.
+
+    // Kerbin surface velocity at equator
 
     // Update drag coefficient if cd_lex has a value
-    if cd_lex:haskey(round(relative_vel:mag)) {
-        set c_drag to cd_lex[round(relative_vel:mag)].
+    if cd_list:haskey(round(velocity_arg:mag)) {
+        set c_drag to cd_list[round(velocity_arg:mag)].
     }
 
     // Cross sectional reference area in m^2, specific to booster
     local ref_area to 11.262.
 
-    return 0.5 * density * relative_vel:mag^2 * c_drag * ref_area * -1 * relative_vel:normalized.
+    print "Drag force: " + (0.5 * density * velocity_arg:mag^2 * c_drag * ref_area) at(0,25).
+    return 0.5 * density * velocity_arg:mag^2 * c_drag * ref_area * -1 * velocity_arg:normalized.
 }
 
 function countdownTimer {
@@ -106,9 +109,10 @@ function timeToBurn {
     parameter deltav.  // Delta-v in m/s
     parameter isp.  // Specific impulse in s
     parameter m_initial.  // Initial mass in kg
+    parameter throttle_arg.  // Throttle %
 
     local m_final to massAfterBurn(deltav, isp, m_initial).
-    return (m_final - m_initial) / max_mass_outflow.
+    return (m_final - m_initial) / (max_mass_outflow * throttle_arg).
 }
 
 function gravityTurn {
@@ -141,18 +145,19 @@ function gravityTurn {
 
 function executeBurn {
     // Executes the given maneuver node
-    parameter burn_node.
+    parameter burn_node.  // Manuever node
+    parameter throttle_arg.  // Throttle % for the burn
 
     // Take control
     rcs on.
     lock steering to burn_node:deltav.
 
     // Get burn time
-    local burn_time to timeToBurn(burn_node:deltav:mag, booster_engines[0]:visp, ship:mass * 1000).
+    local burn_time to timeToBurn(burn_node:deltav:mag, booster_engines[0]:visp, ship:mass * 1000, throttle_arg).
     // Execute burn
     wait until nextnode:eta < (burn_time / 2).
     lock steering to ship:facing:forevector.
-    lock throttle to 1.
+    lock throttle to throttle_arg.
     wait burn_time.
     lock throttle to 0.
 
@@ -175,7 +180,7 @@ function orbitalInsertion {
     // Create a maneuver node at apoapsis with nesecary delta v in the prograde direction
     local obt_insertion_burn to node(timespan(ship:obt:eta:apoapsis), 0, 0, tgt_obt_vel-apoapsis_vel).
     add obt_insertion_burn.
-    executeBurn(obt_insertion_burn).
+    executeBurn(obt_insertion_burn, 1).
 }
 
 function deployPayload {
@@ -203,8 +208,7 @@ function calculateReturnTrajectory {
     // a = (2*body radius + apoapsis + periapsis)/2
     local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 50000) / 2.
     local deorbit_vel to sqrt(kerbin:mu * (2/kerbin:position:mag - 1/deorbit_semimajor_axis)).  // The velocity required to deorbit
-    local current_avg_vel to sqrt(kerbin:mu / ship:obt:semimajoraxis).  // The average velocity of the current orbit
-    local deltav to current_avg_vel - deorbit_vel.  // The delta-v for a deorbiting burn
+    local deltav to ship:obt:velocity:orbit:mag - deorbit_vel.  // The delta-v for a deorbiting burn
 
     clearscreen.
     print "Calculating return trajectory...".
@@ -251,6 +255,7 @@ function calculateReturnTrajectory {
         print "F_drag: " + F_drag(pos_list[n], vel_list[n]):mag + "                                        " at (0,10).
         print "Gravity angle: " + vang(F_gravity(pos_list[n], m_final),vel_list[n]) + " " at(0,11).
         print "Drag angle: " + vang(F_drag(pos_list[n], vel_list[n]), vel_list[n]) + " " at(0,12).
+        print "C_drag: " + c_drag + " " at(0,13).
 
         // drdt = f(vel)
         // dvdt = f(pos, vel)
@@ -287,13 +292,14 @@ function calculateReturnTrajectory {
     // Calculate the ship's current average angular velocity in degrees/s
     // omega (rad/s) = v / r
     // NOTE: must convert to degrees and subtract kerbin's angular velocity
-    local current_angular_vel to current_avg_vel / ship:obt:semimajoraxis * 180 / constant:pi - 360 / kerbin:rotationperiod.
+    local current_angular_vel to ship:obt:velocity:orbit:mag / ship:obt:semimajoraxis * 180 / constant:pi - 360 / kerbin:rotationperiod.
 
     // Calculate time until target_theta is reached
-    // t = 1/omega * (lng of landing zone - target theta - ship lng)
-    local deorbit_time to 1/current_angular_vel * launchpad:lng - target_theta - ship:geoposition:lng.
+    // t = 1/ang_vel * (lng of landing zone - target theta - ship lng)
+    local deorbit_time to 1/current_angular_vel * abs(launchpad:lng - target_theta - ship:geoposition:lng).
 
     // Readout
+    clearscreen.
     print "Tracjetory set!" at(0,10).
     print "Ship rot angle: " + ship_theta at(0,11).
     print "Kerbin rot angle: " + kerbin_theta at(0,12).
@@ -303,7 +309,7 @@ function calculateReturnTrajectory {
     // Create a maneuver node and execute
     local deorbit_burn to node(timespan(deorbit_time), 0, 0, -1*deltav).
     add deorbit_burn.
-    executeBurn(deorbit_burn).
+    executeBurn(deorbit_burn, 1).
 }
 
 function deorbit {
@@ -312,14 +318,13 @@ function deorbit {
     // a = (2*body radius + apoapsis + periapsis)/2
     local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 50000) / 2.
     local deorbit_vel to sqrt(kerbin:mu * (2/kerbin:position:mag - 1/deorbit_semimajor_axis)).  // The velocity required to deorbit
-    local current_avg_vel to sqrt(kerbin:mu / ship:obt:semimajoraxis).  // The average velocity of the current orbit
-    local deltav to current_avg_vel - deorbit_vel.  // The delta-v for a deorbiting burn
+    local deltav to ship:obt:velocity:orbit:mag - deorbit_vel.  // The delta-v for a deorbiting burn
 
     wait 10.
     // Create a maneuver node and execute
     local deorbit_burn to node(timespan(0,0,0,4,0), 0, 0, -1*deltav).
     add deorbit_burn.
-    executeBurn(deorbit_burn).
+    executeBurn(deorbit_burn, 1).
 }
 
 function landingBurn {
@@ -341,7 +346,7 @@ function landingBurn {
     local lock impact_time to (-1*ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude - hover_alt))) / -9.81.
 
     // Calculate the burn time to negate air speed.
-    local lock burn_time to timeToBurn(ship:airspeed, booster_engines[0]:slisp, ship:mass*1000).
+    local lock burn_time to timeToBurn(ship:airspeed, booster_engines[0]:slisp, ship:mass*1000, 1).
 
     // Slow down at the given altitude
     clearscreen.
