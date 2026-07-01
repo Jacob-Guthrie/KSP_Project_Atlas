@@ -18,7 +18,7 @@ stage.  // Start booster engines
 // Flight parameters
 set tgt_altitude to 80000.  // Target orbital altitude in m
 set tgt_twr to 1.1.  // Initial takeoff TWR
-set hover_alt to 2000.  // Altitude in m at which the hoverslam will begin
+set hover_alt to 15000.  // Altitude in m at which the hoverslam will begin
 
 set launchpad to ship:geoposition.  // Geocoordinates structure to help navigation back to launchpad
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s, calculated when booster_engines list is created. Note: value is always negative
@@ -64,9 +64,9 @@ function F_drag {
     local density to kerbin:atm:altitudepressure(ship_alt) * constant:atmtokpa * 1000 / (287.053 * kerbin:atm:alttemp(ship_alt)).  // Density in kg/m^3
 
     // Calculate velocity relative to air
-    // V_air = 2 * pi * r / kerin:rotationperiod
-    //local air_vel to 2 * constant:pi * position_arg:mag / kerbin:rotationperiod * heading(90,0):forevector.
-    //local relative_vel to velocity_arg - air_vel.
+    // Vel_air (with respect to kerbin's center) = 2 * pi * r / kerin:rotationperiod
+    local air_vel to 2 * constant:pi * position_arg:mag / kerbin:rotationperiod * -1 * velocity_arg:normalized.
+    local relative_vel to velocity_arg - air_vel.
 
     // Kerbin surface velocity at equator
 
@@ -78,8 +78,7 @@ function F_drag {
     // Cross sectional reference area in m^2, specific to booster
     local ref_area to 11.262.
 
-    print "Drag force: " + (0.5 * density * velocity_arg:mag^2 * c_drag * ref_area) at(0,25).
-    return 0.5 * density * velocity_arg:mag^2 * c_drag * ref_area * -1 * velocity_arg:normalized.
+    return 0.5 * density * relative_vel:mag^2 * c_drag * ref_area * -1 * velocity_arg:normalized.
 }
 
 function countdownTimer {
@@ -219,7 +218,7 @@ function calculateReturnTrajectory {
     
     // Parameters
     local n to 0.  // Index
-    local t to 0.  // Time in s
+    local t to 0.25.  // Time in s
     local step to 1.  // KSP tries to do a physics update 50 times a second.
 
     // Inital conditions
@@ -251,11 +250,8 @@ function calculateReturnTrajectory {
         print "Loop #: " + (n+1) at(0,6).
         print "Alt: " + (pos_list[n]:mag - kerbin:radius) + " " at(0,7).
         print "Vel mag: " + vel_list[n]:mag + " " at(0,8).
-        print "F_gravity: " + F_gravity(pos_list[n], m_final):mag + " " at (0,9).
-        print "F_drag: " + F_drag(pos_list[n], vel_list[n]):mag + "                                        " at (0,10).
-        print "Gravity angle: " + vang(F_gravity(pos_list[n], m_final),vel_list[n]) + " " at(0,11).
-        print "Drag angle: " + vang(F_drag(pos_list[n], vel_list[n]), vel_list[n]) + " " at(0,12).
-        print "C_drag: " + c_drag + " " at(0,13).
+        print "F_drag: " + F_drag(pos_list[n], vel_list[n]):mag + "                                        " at (0,9).
+        print "C_drag: " + c_drag + " " at(0,10).
 
         // drdt = f(vel)
         // dvdt = f(pos, vel)
@@ -279,32 +275,30 @@ function calculateReturnTrajectory {
         set n to n+1.
     }
 
+    // Calculate kerbin and ship's angular velocity in deg/s
+    local kerbin_omega to 360 / kerbin:rotationperiod.
+    local ship_omega to ship:obt:velocity:orbit:mag / kerbin:position:mag * 180 / constant:pi.
+
     // Calculate angle the ship rotated around Kerbin
     // NOTE: the ship will rotate more than 180 degrees due to the shallow reentry profile so vang() will return the absolute value of the negative coterminal angle
-    local ship_theta to 360 - vang(pos_list[0], pos_list[n]).
+    local ship_theta to vang(pos_list[0], pos_list[n]).
 
     // Calculate the angle Kerbin rotates during the time elapsed
     // t(s) * 360 (deg) / rotation_period (s) = angle rotated in degrees
-    local kerbin_theta to t * 360 / kerbin:rotationperiod.
+    local kerbin_theta to t * kerbin_omega.
 
     // Calculate the angle between the landing zone and the ship at the start of the deorbiting burn
-    local target_theta to ship_theta - kerbin_theta.
-
-    // Calculate the ship's current average angular velocity in degrees/s
-    // omega (rad/s) = v / r
-    // NOTE: must convert to degrees and subtract kerbin's angular velocity
-    local current_angular_vel to ship:obt:velocity:orbit:mag / ship:obt:semimajoraxis * 180 / constant:pi - 360 / kerbin:rotationperiod.
+    local target_theta to ship_theta + kerbin_theta.
 
     // Calculate time until target_theta is reached
-    // t = 1/ang_vel * (lng of landing zone - target theta - ship lng)
-    local deorbit_time to 1/current_angular_vel * abs(launchpad:lng - target_theta - ship:geoposition:lng).
+    // t = (tgt_theta + launchpad:lng - current:lng) / (ship omega - kerbin omega)
+    local deorbit_time to (target_theta + launchpad:lng - ship:geoposition:lng) / (ship_omega - kerbin_omega).
 
     // Readout
     clearscreen.
     print "Tracjetory set!" at(0,10).
     print "Ship rot angle: " + ship_theta at(0,11).
     print "Kerbin rot angle: " + kerbin_theta at(0,12).
-    print "Current angular vel: " + current_angular_vel at(0,13).
     print "Deorbiting time: " + deorbit_time at (0,14).
 
     // Create a maneuver node and execute
@@ -338,7 +332,6 @@ function landingBurn {
 
     // Release control when ship enters atmosphere
     wait until ship:altitude < 70000.
-    unlock steering.
     rcs off.
 
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
@@ -391,3 +384,9 @@ print "Payload fairing separation.".
 orbitalInsertion().
 calculateReturnTrajectory().
 landingBurn().
+
+// TODO
+
+// Make better debug menu for reentry
+// Make a landing script
+// Figure out how to model temperature
