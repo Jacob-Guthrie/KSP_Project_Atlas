@@ -19,10 +19,13 @@ stage.  // Start booster engines
 set tgt_altitude to 80000.  // Target orbital altitude in m
 set tgt_twr to 1.1.  // Initial takeoff TWR
 set hover_alt to 15000.  // Altitude in m at which the hoverslam will begin
+set c_drag to 3.2.  // Average dimensionless drag coefficent used as an initial value
+set ref_area to 11.262.  // Cross-sectional reference area in m^2
 
 set launchpad to ship:geoposition.  // Geocoordinates structure to help navigation back to launchpad
+set equatorial_normal to heading(0,0):forevector.  // Unit vector normal to equatorial plane
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s, calculated when booster_engines list is created. Note: value is always negative
-set c_drag to 3.2.  // Average dimensionless drag coefficent used as an initial value
+
 
 // Lists and lexicons
 set cd_list to readJson("cd_list.json").
@@ -35,10 +38,59 @@ for eng in ship:engines {
         set max_mass_outflow to max_mass_outflow - eng:maxmassflow * 1000.  // maxmassflow is in Mg/s
     }
 }
+// List of temperature curves and modifiers for Kerbin based on game data
+set temperatureCurve to lexicon(0,288.15,8815.22,216.65,16050.39,216.65,25729.23,228.65,37879.44,270.65,41129.24,270.65,57440.13,214.65,68797.88,186.946,70000,186.946).  // Keyed by altitude
+set temperatureSunMultCurve to lexicon(0,1,8815.22,0.3,16050.39,0,25729.23,0,37879.44,0.2,57440.13,0.2,63902.72,1,70000,1.2).  // Keyed by altitude
+set temperatureLatitudeBiasCurve to lexicon(0,17,10,12,18,6.36371,30,0,35,-10,45,-23,55,-31,70,-37,90,-50).  // Keyed by latitude
+set temperatureLatitudeSunMultCurve to lexicon(0,9,40,14.2,55,14.9,68,12.16518,76,8.582909,90,5).  // Keyed by latitude
 
 //
 //   Functions
 //
+
+function getAtmTemperature {
+    // Returns an estimated temperature based on given position vectors for Kerbin and Kerbol
+    parameter kerbin_pos.  // Kerbin position vector in m
+    parameter sun_arg.  // Kerbol position vector in m from the ship
+
+    // Calculate altitude
+    local atm_alt to kerbin_pos:mag - kerbin:radius.
+
+    // Calculate latitude
+    // Latitude = abs(90-angle between kerbin_pos and the equatorial normal)
+    local lat to abs(90-vang(equatorial_normal, kerbin_pos)).
+
+    // Calculate sunDotNormalized
+    // sunDotNormalized = 0.5 * cos(HRA-45) + 0.5. 
+    local sun_pos to sun_arg - kerbin_pos.  // Kerbol position vector from Kerbin
+
+    // Calculate base temperature based on atmospheric height
+    local base_temp to interpolate(temperatureCurve, atm_alt).
+
+    // Calculate temperature modifier
+    // Modifier = temperatureSunMultCurve * [ temperatureLatitudeBiasCurve + temperatureLatitudeSunMultCurve * sunDotNormalized]
+    set temp_mod to interpolate(temperatureLatitudeBiasCurve, abs(90-vang(equatorial_normal, kerbin_pos))).
+
+}
+
+function interpolate {
+    // Performs linear interpolation on a lexicon to return a value based on a lookup value
+    parameter lex_arg.  // Lexicon to evaluate
+    parameter lookup_value.  // Value to lookup (x)
+
+    local i to lex_arg:length.
+    // Search the lexicon keys in reverse until a key is less than the lookup value
+    until lex_arg:keys[i] < lookup_value {
+        set i to i - 1.
+    }
+    local lo_key to lex_arg:keys[i-1].  // Key of the low endpoint (x1)
+    local hi_key to lex_arg:keys[i].  // Key of the high endpoint (x2)
+    local lo_endpoint to lex_arg[lo_key].  // Value of the low endpoint (y1)
+    local hi_endpoint to lex_arg[hi_key].  // Value of the high endpoint (y2)
+
+    // y = (y2 - y1) * (x - x1) / (x2 - x1) + y1
+    return (hi_endpoint - lo_endpoint) * (lookup_value - lo_key) / (hi_key - lo_key) + lo_endpoint.
+}
 
 function F_gravity {
     // Returns the gravity force vector in N from a given mass and position vector using Newton's law of gravity
@@ -74,9 +126,6 @@ function F_drag {
     if cd_list:haskey(round(velocity_arg:mag)) {
         set c_drag to cd_list[round(velocity_arg:mag)].
     }
-
-    // Cross sectional reference area in m^2, specific to booster
-    local ref_area to 11.262.
 
     return 0.5 * density * relative_vel:mag^2 * c_drag * ref_area * -1 * velocity_arg:normalized.
 }
@@ -390,3 +439,4 @@ landingBurn().
 // Make better debug menu for reentry
 // Make a landing script
 // Figure out how to model temperature
+
