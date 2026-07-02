@@ -23,9 +23,8 @@ set c_drag to 3.2.  // Average dimensionless drag coefficent used as an initial 
 set ref_area to 11.262.  // Cross-sectional reference area in m^2
 
 set launchpad to ship:geoposition.  // Geocoordinates structure to help navigation back to launchpad
-set equatorial_normal to heading(0,0):forevector.  // Unit vector normal to equatorial plane
+set equatorial_normal to heading(0,0):forevector.  // Unit vector normal to equatorial plane pointing towards the north pole
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s, calculated when booster_engines list is created. Note: value is always negative
-
 
 // Lists and lexicons
 set cd_list to readJson("cd_list.json").
@@ -51,7 +50,7 @@ set temperatureLatitudeSunMultCurve to lexicon(0,9,40,14.2,55,14.9,68,12.16518,7
 function getAtmTemperature {
     // Returns an estimated temperature based on given position vectors for Kerbin and Kerbol
     parameter kerbin_pos.  // Kerbin position vector in m
-    parameter sun_arg.  // Kerbol position vector in m from the ship
+    parameter sun_pos.  // Kerbol position vector in m from the ship
 
     // Calculate altitude
     local atm_alt to kerbin_pos:mag - kerbin:radius.
@@ -61,16 +60,30 @@ function getAtmTemperature {
     local lat to abs(90-vang(equatorial_normal, kerbin_pos)).
 
     // Calculate sunDotNormalized
-    // sunDotNormalized = 0.5 * cos(HRA-45) + 0.5. 
-    local sun_pos to sun_arg - kerbin_pos.  // Kerbol position vector from Kerbin
+    // sunDotNormalized = 0.5 * cos(hour_angle-45) + 0.5. 
+    local kerbin_sun_pos to kerbin_pos - sun_pos.  // Kerbin position vector from Kerbol
+    local proj_kerbin_pos to kerbin_pos - vdot(kerbin_pos, equatorial_normal) * equatorial_normal.  // The projection of kerbin position vector onto the equatorial plane.
+    local ref_vector to vcrs(kerbin_sun_pos, equatorial_normal):normalized.  // A unit vector in the equatorial plane which serves as a reference for positive and negative hour angles, if the dot product with kerbin position vector is negative then the hour angle is negative
+    local hour_angle to vang(kerbin_sun_pos, proj_kerbin_pos).
+    if vdot(proj_kerbin_pos, ref_vector) < 0 {
+        set hour_angle to -1 * hour_angle.
+    }
+    local sunDotNormalized to 0.5 * cos(hour_angle - 45) + 0.5.
 
     // Calculate base temperature based on atmospheric height
     local base_temp to interpolate(temperatureCurve, atm_alt).
 
     // Calculate temperature modifier
     // Modifier = temperatureSunMultCurve * [ temperatureLatitudeBiasCurve + temperatureLatitudeSunMultCurve * sunDotNormalized]
-    set temp_mod to interpolate(temperatureLatitudeBiasCurve, abs(90-vang(equatorial_normal, kerbin_pos))).
+    set temp_mod to interpolate(temperatureSunMultCurve, atm_alt) * ( interpolate(temperatureLatitudeBiasCurve, lat) + interpolate(temperatureLatitudeSunMultCurve, lat) * sunDotNormalized).
 
+    print "Lat: " + round(lat, 1) + "   " at(0,2).
+    print "Base Temp: " + round(base_temp, 1) + "   " at(0,3).
+    print "Temp Mod: " + round(temp_mod, 1) + "   " at(0,4).
+    print "Hour Angle: " + round(hour_angle,1) + "   " at(0,5).
+    print "Predicted Temp: " + round(base_temp+temp_mod, 1) + "   " at(0,6).
+
+    return base_temp + temp_mod.
 }
 
 function interpolate {
@@ -78,13 +91,13 @@ function interpolate {
     parameter lex_arg.  // Lexicon to evaluate
     parameter lookup_value.  // Value to lookup (x)
 
-    local i to lex_arg:length.
+    local i to lex_arg:length - 1.
     // Search the lexicon keys in reverse until a key is less than the lookup value
     until lex_arg:keys[i] < lookup_value {
         set i to i - 1.
     }
-    local lo_key to lex_arg:keys[i-1].  // Key of the low endpoint (x1)
-    local hi_key to lex_arg:keys[i].  // Key of the high endpoint (x2)
+    local lo_key to lex_arg:keys[i].  // Key of the low endpoint (x1)
+    local hi_key to lex_arg:keys[i+1].  // Key of the high endpoint (x2)
     local lo_endpoint to lex_arg[lo_key].  // Value of the low endpoint (y1)
     local hi_endpoint to lex_arg[hi_key].  // Value of the high endpoint (y2)
 
@@ -107,6 +120,7 @@ function F_drag {
     // Density (rho) = pressure / (287.053 * temperature)
     parameter position_arg.  // Kerbin position vector in m
     parameter velocity_arg.  // Ship velocity vector in m/s
+    parameter sun_pos.  // Kerbol position vector in m
 
     // Calculate atmospheric density
     local ship_alt to position_arg:mag - kerbin:radius.
@@ -378,10 +392,7 @@ function landingBurn {
     rcs on.
     brakes on.
     lock steering to ship:srfretrograde.
-
-    // Release control when ship enters atmosphere
     wait until ship:altitude < 70000.
-    rcs off.
 
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
@@ -391,27 +402,37 @@ function landingBurn {
     // Calculate the burn time to negate air speed.
     local lock burn_time to timeToBurn(ship:airspeed, booster_engines[0]:slisp, ship:mass*1000, 1).
 
-    // Slow down at the given altitude
     clearscreen.
-    print "Reentry Program".
-    wait until impact_time < burn_time.
-    lock steering to ship:srfretrograde.
-    // Locks throttle to target velocity of 20 m/s
+    print "TEMP FUNCTION DEBUG" at(0,0).
+    print "VELOCITY DEBUG" at(0,10).
+    until ship:altitude < 2000 {
+        print "KOS Temp: " + round(kerbin:atm:alttemp(ship:altitude),1) + "   " at(0,7).
+        print "Orbital V: " + round(ship:obt:velocity:orbit:mag, 1) + "   " at(0,12).
+        print "Surface V: " + round(ship:obt:velocity:surface:mag, 1) + "   " at(0,13).
+        print "Calculated Airspeed: " + round((ship:obt:velocity:orbit - 2*constant:pi*kerbin:position:mag/kerbin:rotationperiod*heading(90,0):forevector):mag, 1) + "   " at(0,14).
+        print "Airspeed: " + round(ship:airspeed, 1) + "   " at(0,15).
+        // Assume temperature prediction is correct
+        print "Fluid V: " + round(sqrt(2*287.053*getAtmTemperature(kerbin:position, sun:position)*addons:far:dynpres/kerbin:atm:altitudepressure(ship:altitude)), 1) + "   " at(0,16).
+    }
+
+    //// Slow down at the given altitude
+    //clearscreen.
+    //print "Reentry Program".
+    //wait until impact_time < burn_time.
+    //lock steering to ship:srfretrograde.
+    //// Locks throttle to target velocity of 20 m/s
     lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
-    wait until ship:airspeed < 25.
-    lock steering to up.
-
-    // ADD CODE HERE TO STEER TOWARDS LANDING PAD
-
-    wait until ship:altitude - ship:geoposition:terrainheight < 50.
-    // Locks throttle to target velocity of 5 m/s
-    lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
-    lock steering to up.
-    wait until ship:altitude - ship:geoposition:terrainheight < 5.
-    lock throttle to 0.
-    wait 1.
-    clearscreen.
-    print "Landed!".
+    //wait until ship:airspeed < 25.
+    //lock steering to up.
+    //wait until ship:altitude - ship:geoposition:terrainheight < 50.
+    //// Locks throttle to target velocity of 5 m/s
+    //lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
+    //lock steering to up.
+    //wait until ship:altitude - ship:geoposition:terrainheight < 5.
+    //lock throttle to 0.
+    //wait 1.
+    //clearscreen.
+    //print "Landed!".
 }
 
 lock twr_throttle to min(1, max(0, tgt_twr * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrustat(kerbin:atm:altitudepressure(ship:altitude)) * 1000))).  // A throttle ratio [0,1] that provides target TWR
@@ -431,12 +452,10 @@ stage.  // Deploy payload fairing
 clearscreen.
 print "Payload fairing separation.".
 orbitalInsertion().
-calculateReturnTrajectory().
+deorbit().
 landingBurn().
 
 // TODO
 
 // Make better debug menu for reentry
-// Make a landing script
-// Figure out how to model temperature
-
+// Make a landing script=
