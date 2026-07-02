@@ -23,21 +23,21 @@ set c_drag to 3.2.  // Average dimensionless drag coefficent used as an initial 
 set ref_area to 11.262.  // Cross-sectional reference area in m^2
 
 set launchpad to ship:geoposition.  // Geocoordinates structure to help navigation back to launchpad
-set equatorial_normal to heading(0,0):forevector.  // Unit vector normal to equatorial plane pointing towards the north pole
+set equatorial_normal to heading(0,0):forevector.  // Unit vector normal to the equatorial plane and pointing towards the north pole
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s, calculated when booster_engines list is created. Note: value is always negative
 
 // Lists and lexicons
-set cd_list to readJson("cd_list.json").
+//set cd_list to readJson("cd_list.json").
 set booster_engines to list().  // List of booster engines
 // Populate booster_engines list and measure max mass outflow rate
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s
 for eng in ship:engines {
     if eng:ignition {
         booster_engines:add(eng).
-        set max_mass_outflow to max_mass_outflow - eng:maxmassflow * 1000.  // maxmassflow is in Mg/s
+        set max_mass_outflow to max_mass_outflow - eng:maxmassflow * 1000.
     }
 }
-// List of temperature curves and modifiers for Kerbin based on game data
+// Lexicons of temperature curves and modifiers for Kerbin based on game data
 set temperatureCurve to lexicon(0,288.15,8815.22,216.65,16050.39,216.65,25729.23,228.65,37879.44,270.65,41129.24,270.65,57440.13,214.65,68797.88,186.946,70000,186.946).  // Keyed by altitude
 set temperatureSunMultCurve to lexicon(0,1,8815.22,0.3,16050.39,0,25729.23,0,37879.44,0.2,57440.13,0.2,63902.72,1,70000,1.2).  // Keyed by altitude
 set temperatureLatitudeBiasCurve to lexicon(0,17,10,12,18,6.36371,30,0,35,-10,45,-23,55,-31,70,-37,90,-50).  // Keyed by latitude
@@ -80,7 +80,7 @@ function getAtmTemperature {
     print "Lat: " + round(lat, 1) + "   " at(0,2).
     print "Base Temp: " + round(base_temp, 1) + "   " at(0,3).
     print "Temp Mod: " + round(temp_mod, 1) + "   " at(0,4).
-    print "Hour Angle: " + round(hour_angle,1) + "   " at(0,5).
+    print "Hour Angle: " + round(hour_angle, 1) + "   " at(0,5).
     print "Predicted Temp: " + round(base_temp+temp_mod, 1) + "   " at(0,6).
 
     return base_temp + temp_mod.
@@ -406,13 +406,18 @@ function landingBurn {
     print "TEMP FUNCTION DEBUG" at(0,0).
     print "VELOCITY DEBUG" at(0,10).
     until ship:altitude < 2000 {
-        print "KOS Temp: " + round(kerbin:atm:alttemp(ship:altitude),1) + "   " at(0,7).
-        print "Orbital V: " + round(ship:obt:velocity:orbit:mag, 1) + "   " at(0,12).
-        print "Surface V: " + round(ship:obt:velocity:surface:mag, 1) + "   " at(0,13).
-        print "Calculated Airspeed: " + round((ship:obt:velocity:orbit - 2*constant:pi*kerbin:position:mag/kerbin:rotationperiod*heading(90,0):forevector):mag, 1) + "   " at(0,14).
-        print "Airspeed: " + round(ship:airspeed, 1) + "   " at(0,15).
-        // Assume temperature prediction is correct
-        print "Fluid V: " + round(sqrt(2*287.053*getAtmTemperature(kerbin:position, sun:position)*addons:far:dynpres/kerbin:atm:altitudepressure(ship:altitude)), 1) + "   " at(0,16).
+        local alt_pressure to kerbin:atm:altitudepressure(ship:altitude)*constant:atmtokpa*1000.
+        local drag to addons:far:aeroforce:mag*1000.
+        local dyn_pres to addons:far:dynpres*1000.
+        local vel to ship:obt:velocity:surface:mag.
+        local r_cons to 287.053.
+        // Assume ferram uses surface v
+        if dyn_pres > 0 {
+            print "Temperature based on Q: " + round(alt_pressure*vel^2/(2*r_cons*dyn_pres),1) + "   " at(0,19).
+        }
+        if drag > 0 {
+            print "Temperature based on drag: " + round(alt_pressure*vel^2*addons:far:cd*11.262/(r_cons*2*drag), 1) + "   " at(0,20).
+        }
     }
 
     //// Slow down at the given altitude
