@@ -18,8 +18,7 @@ stage.  // Start booster engines
 // Flight parameters
 set tgt_altitude to 80000.  // Target orbital altitude in m
 set tgt_twr to 1.1.  // Initial takeoff TWR
-set hover_alt to 15000.  // Altitude in m at which the hoverslam will begin
-set c_drag to 3.2.  // Average dimensionless drag coefficent used as an initial value
+set hover_alt to 7000.  // Altitude in m at which the hoverslam will begin
 set ref_area to 11.262.  // Cross-sectional reference area in m^2
 
 set launchpad to ship:geoposition.  // Geocoordinates structure to help navigation back to launchpad
@@ -27,7 +26,7 @@ set equatorial_normal to heading(0,0):forevector.  // Unit vector normal to the 
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s, calculated when booster_engines list is created. Note: value is always negative
 
 // Lists and lexicons
-//set cd_list to readJson("cd_list.json").
+
 set booster_engines to list().  // List of booster engines
 // Populate booster_engines list and measure max mass outflow rate
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s
@@ -37,15 +36,56 @@ for eng in ship:engines {
         set max_mass_outflow to max_mass_outflow - eng:maxmassflow * 1000.
     }
 }
+set sl_isp to booster_engines[0]:slisp.  // Sea level isp for the booster in s
+set v_isp to booster_engines[0]:visp.  // Vacuum isp for the booster in s
 // Lexicons of temperature curves and modifiers for Kerbin based on game data
 set temperatureCurve to lexicon(0,288.15,8815.22,216.65,16050.39,216.65,25729.23,228.65,37879.44,270.65,41129.24,270.65,57440.13,214.65,68797.88,186.946,70000,186.946).  // Keyed by altitude
 set temperatureSunMultCurve to lexicon(0,1,8815.22,0.3,16050.39,0,25729.23,0,37879.44,0.2,57440.13,0.2,63902.72,1,70000,1.2).  // Keyed by altitude
 set temperatureLatitudeBiasCurve to lexicon(0,17,10,12,18,6.36371,30,0,35,-10,45,-23,55,-31,70,-37,90,-50).  // Keyed by latitude
 set temperatureLatitudeSunMultCurve to lexicon(0,9,40,14.2,55,14.9,68,12.16518,76,8.582909,90,5).  // Keyed by latitude
+// Read mach_cd.json and reverse the order of keys
+set cd_lex to lexicon().
+set avg_cd to 0.  // Average of all drag coefficient entries
+set read_lex to readJson("mach_cd.json").
+set read_index to read_lex:length - 1.
+until read_index = -1 {
+    set cd_lex[read_lex:keys[read_index]] to read_lex:values[read_index].  // List of drag coefficients keyed by mach number
+    set avg_cd to avg_cd + read_lex:values[read_index].
+    set read_index to read_index - 1.
+}
+set avg_cd to avg_cd / read_lex:length.
 
 //
 //   Functions
 //
+
+function fineTuneOrbit {
+    // Zeros the inclination and eccentricity of the orbit
+
+    rcs on.
+    local lock orbital_vel to ship:obt:velocity:orbit.
+    local lock tgt_vel to sqrt(kerbin:mu/kerbin:position:mag) * heading(90,0):forevector.
+    local lock delta_v to tgt_vel - orbital_vel.
+    local burn_vec to equatorial_normal.  // Just needs to be initalized somewhere the ship isn't facing
+    lock steering to burn_vec.
+    until vang(ship:facing:forevector, burn_vec) < 0.05 {
+        if delta_v < 0 {
+            set burn_vec to ship:retrograde:forevector.
+        } else {
+            set burn_vec to ship:prograde:forevector.
+        }
+    }
+    lock throttle to 1.
+    wait timeToBurn(abs(delta_v), v_isp, ship:mass * 1000, 1).
+    lock throttle to 0.
+}
+
+function projectOntoEquatorialPlane {
+    // Projects the input vector onto the equatorial plane of Kerbin
+    parameter input_vec.
+
+    return input_vec - vdot(input_vec, equatorial_normal) * equatorial_normal.
+}
 
 function getAtmTemperature {
     // Returns an estimated temperature based on given position vectors for Kerbin and Kerbol
@@ -62,7 +102,7 @@ function getAtmTemperature {
     // Calculate sunDotNormalized
     // sunDotNormalized = 0.5 * cos(hour_angle-45) + 0.5. 
     local kerbin_sun_pos to kerbin_pos - sun_pos.  // Kerbin position vector from Kerbol
-    local proj_kerbin_pos to kerbin_pos - vdot(kerbin_pos, equatorial_normal) * equatorial_normal.  // The projection of kerbin position vector onto the equatorial plane.
+    local proj_kerbin_pos to projectOntoEquatorialPlane(kerbin_pos).  // The projection of kerbin position vector onto the equatorial plane.
     local ref_vector to vcrs(kerbin_sun_pos, equatorial_normal):normalized.  // A unit vector in the equatorial plane which serves as a reference for positive and negative hour angles, if the dot product with kerbin position vector is negative then the hour angle is negative
     local hour_angle to vang(kerbin_sun_pos, proj_kerbin_pos).
     if vdot(proj_kerbin_pos, ref_vector) < 0 {
@@ -76,12 +116,6 @@ function getAtmTemperature {
     // Calculate temperature modifier
     // Modifier = temperatureSunMultCurve * [ temperatureLatitudeBiasCurve + temperatureLatitudeSunMultCurve * sunDotNormalized]
     set temp_mod to interpolate(temperatureSunMultCurve, atm_alt) * ( interpolate(temperatureLatitudeBiasCurve, lat) + interpolate(temperatureLatitudeSunMultCurve, lat) * sunDotNormalized).
-
-    print "Lat: " + round(lat, 1) + "   " at(0,2).
-    print "Base Temp: " + round(base_temp, 1) + "   " at(0,3).
-    print "Temp Mod: " + round(temp_mod, 1) + "   " at(0,4).
-    print "Hour Angle: " + round(hour_angle, 1) + "   " at(0,5).
-    print "Predicted Temp: " + round(base_temp+temp_mod, 1) + "   " at(0,6).
 
     return base_temp + temp_mod.
 }
@@ -119,29 +153,34 @@ function F_drag {
     // F_drag = 0.5 * rho * v^2 * c_drag * A
     // Density (rho) = pressure / (287.053 * temperature)
     parameter position_arg.  // Kerbin position vector in m
-    parameter velocity_arg.  // Ship velocity vector in m/s
+    parameter velocity_arg.  // Ship surface velocity vector in m/s
     parameter sun_pos.  // Kerbol position vector in m
 
-    // Calculate atmospheric density
     local ship_alt to position_arg:mag - kerbin:radius.
-    if kerbin:atm:alttemp(ship_alt) = 0 {
+    if ship_alt > 70000 {
         return 0 * velocity_arg.  // Returns zero vector if ship is outside atmosphere
     }
-    local density to kerbin:atm:altitudepressure(ship_alt) * constant:atmtokpa * 1000 / (287.053 * kerbin:atm:alttemp(ship_alt)).  // Density in kg/m^3
+    local atm_temp to getAtmTemperature(position_arg, sun_pos).
 
-    // Calculate velocity relative to air
-    // Vel_air (with respect to kerbin's center) = 2 * pi * r / kerin:rotationperiod
-    local air_vel to 2 * constant:pi * position_arg:mag / kerbin:rotationperiod * -1 * velocity_arg:normalized.
-    local relative_vel to velocity_arg - air_vel.
+    // Calculate atmospheric density
+    local density to kerbin:atm:altitudepressure(ship_alt) * constant:atmtokpa * 1000 / (287.053 * atm_temp).  // Density in kg/m^3
+    
+    // Calculate surface velocity and velocity relative to air
+    // srf_vel = r * omega * cos(latitude)
+    local position_proj to projectOntoEquatorialPlane(position_arg).  // The projection of position_arg vector onto the equatorial plane.
+    local srf_dir to -1 * vcrs(position_proj, equatorial_normal):normalized.  // The unit vector pointing in the direction of Kerbin's rotation
+    local lat to abs(90-vang(equatorial_normal, position_arg)).  // Latitude
+    local srf_vel to kerbin:radius * kerbin:angularvel:mag * cos(lat) * srf_dir.
+    local relative_vel to velocity_arg - srf_vel.
 
-    // Kerbin surface velocity at equator
-
-    // Update drag coefficient if cd_lex has a value
-    if cd_list:haskey(round(velocity_arg:mag)) {
-        set c_drag to cd_list[round(velocity_arg:mag)].
+    // Calculate mach number and interpolate drag coefficient
+    local c_drag to avg_cd.
+    local mach to relative_vel:mag / sqrt(1.4*287.053*atm_temp).
+    if cd_lex:haskey(round(mach, 1)) {
+        set c_drag to cd_lex[round(mach, 1)].
     }
 
-    return 0.5 * density * relative_vel:mag^2 * c_drag * ref_area * -1 * velocity_arg:normalized.
+    return 0.5 * density * relative_vel:mag^2 * c_drag * ref_area * -1 * relative_vel:normalized.
 }
 
 function countdownTimer {
@@ -215,7 +254,7 @@ function executeBurn {
     lock steering to burn_node:deltav.
 
     // Get burn time
-    local burn_time to timeToBurn(burn_node:deltav:mag, booster_engines[0]:visp, ship:mass * 1000, throttle_arg).
+    local burn_time to timeToBurn(burn_node:deltav:mag, v_isp, ship:mass * 1000, throttle_arg).
     // Execute burn
     wait until nextnode:eta < (burn_time / 2).
     lock steering to ship:facing:forevector.
@@ -268,7 +307,7 @@ function calculateReturnTrajectory {
     // Use the vis-viva equation to determine the deltav of a deorbiting burn targeting a periapsis of 50km
     // v^2 = mu * (2/r - 1/a)
     // a = (2*body radius + apoapsis + periapsis)/2
-    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 50000) / 2.
+    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 52000) / 2.
     local deorbit_vel to sqrt(kerbin:mu * (2/kerbin:position:mag - 1/deorbit_semimajor_axis)).  // The velocity required to deorbit
     local deltav to ship:obt:velocity:orbit:mag - deorbit_vel.  // The delta-v for a deorbiting burn
 
@@ -281,11 +320,11 @@ function calculateReturnTrajectory {
     
     // Parameters
     local n to 0.  // Index
-    local t to 0.25.  // Time in s
+    local t to 0.  // Time in s
     local step to 1.  // KSP tries to do a physics update 50 times a second.
 
     // Inital conditions
-    local m_final to massAfterBurn(deltav, booster_engines[0]:visp, ship:mass * 1000).
+    local m_final to massAfterBurn(deltav, v_isp, ship:mass * 1000).
     global pos_list to list().
     global vel_list to list().
     pos_list:add(kerbin:position).
@@ -304,7 +343,7 @@ function calculateReturnTrajectory {
         parameter position_arg.  // Position vector in m
         parameter velocity_arg.  // Velocity vector in m/s
 
-        return 1/m_final * ( F_gravity(position_arg, m_final) + F_drag(position_arg, velocity_arg) ).
+        return 1/m_final * ( F_gravity(position_arg, m_final) + F_drag(position_arg, velocity_arg, sun:position)).
     }
 
     // 4th order Runge-Kutta method
@@ -313,8 +352,7 @@ function calculateReturnTrajectory {
         print "Loop #: " + (n+1) at(0,6).
         print "Alt: " + (pos_list[n]:mag - kerbin:radius) + " " at(0,7).
         print "Vel mag: " + vel_list[n]:mag + " " at(0,8).
-        print "F_drag: " + F_drag(pos_list[n], vel_list[n]):mag + "                                        " at (0,9).
-        print "C_drag: " + c_drag + " " at(0,10).
+        print "Drag: " + F_drag(pos_list[n], vel_list[n], sun:position):mag at (0,9).
 
         // drdt = f(vel)
         // dvdt = f(pos, vel)
@@ -338,43 +376,33 @@ function calculateReturnTrajectory {
         set n to n+1.
     }
 
-    // Calculate kerbin and ship's angular velocity in deg/s
-    local kerbin_omega to 360 / kerbin:rotationperiod.
-    local ship_omega to ship:obt:velocity:orbit:mag / kerbin:position:mag * 180 / constant:pi.
-
-    // Calculate angle the ship rotated around Kerbin
-    // NOTE: the ship will rotate more than 180 degrees due to the shallow reentry profile so vang() will return the absolute value of the negative coterminal angle
-    local ship_theta to vang(pos_list[0], pos_list[n]).
-
-    // Calculate the angle Kerbin rotates during the time elapsed
-    // t(s) * 360 (deg) / rotation_period (s) = angle rotated in degrees
-    local kerbin_theta to t * kerbin_omega.
-
-    // Calculate the angle between the landing zone and the ship at the start of the deorbiting burn
-    local target_theta to ship_theta + kerbin_theta.
-
-    // Calculate time until target_theta is reached
-    // t = (tgt_theta + launchpad:lng - current:lng) / (ship omega - kerbin omega)
-    local deorbit_time to (target_theta + launchpad:lng - ship:geoposition:lng) / (ship_omega - kerbin_omega).
-
+    local ship_theta to vang(projectOntoEquatorialPlane(pos_list[0]), projectOntoEquatorialPlane(pos_list[n])).
+    local kerbin_theta to t * kerbin:angularvel:mag * 180 / constant:pi.
     // Readout
     clearscreen.
-    print "Tracjetory set!" at(0,10).
-    print "Ship rot angle: " + ship_theta at(0,11).
-    print "Kerbin rot angle: " + kerbin_theta at(0,12).
-    print "Deorbiting time: " + deorbit_time at (0,14).
+    print "Tracjetory set!" at(0,0).
+    print "Ship rot angle: " + ship_theta at(0,1).
+    print "Kerbin rot angle: " + kerbin_theta at(0,2).
 
-    // Create a maneuver node and execute
-    local deorbit_burn to node(timespan(deorbit_time), 0, 0, -1*deltav).
-    add deorbit_burn.
-    executeBurn(deorbit_burn, 1).
+    lock steering to ship:retrograde.
+
+    until abs(ship:longitude - (launchpad:lng + ship_theta)) < 0.1. {
+        print "Current Lng: " + round(ship:longitude, 1) + "   " at(0,4).
+        print "Target Lng: " + round(launchpad:lng + ship_theta, 1) + "   " at(0,5).
+        wait 0.
+    }
+
+    local wait_time to timeToBurn(deltav, v_isp, ship:mass * 1000, 1).
+    lock throttle to 1.
+    wait wait_time.
+    lock throttle to 0.
 }
 
 function deorbit {
     // Use the vis-viva equation to determine the deltav of a deorbiting burn targeting a periapsis of 50km
     // v^2 = mu * (2/r - 1/a)
     // a = (2*body radius + apoapsis + periapsis)/2
-    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 50000) / 2.
+    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 52000) / 2.
     local deorbit_vel to sqrt(kerbin:mu * (2/kerbin:position:mag - 1/deorbit_semimajor_axis)).  // The velocity required to deorbit
     local deltav to ship:obt:velocity:orbit:mag - deorbit_vel.  // The delta-v for a deorbiting burn
 
@@ -393,6 +421,7 @@ function landingBurn {
     brakes on.
     lock steering to ship:srfretrograde.
     wait until ship:altitude < 70000.
+    rcs off.
 
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
@@ -400,44 +429,27 @@ function landingBurn {
     local lock impact_time to (-1*ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude - hover_alt))) / -9.81.
 
     // Calculate the burn time to negate air speed.
-    local lock burn_time to timeToBurn(ship:airspeed, booster_engines[0]:slisp, ship:mass*1000, 1).
-
-    clearscreen.
-    print "TEMP FUNCTION DEBUG" at(0,0).
-    print "VELOCITY DEBUG" at(0,10).
-    until ship:altitude < 2000 {
-        local alt_pressure to kerbin:atm:altitudepressure(ship:altitude)*constant:atmtokpa*1000.
-        local drag to addons:far:aeroforce:mag*1000.
-        local dyn_pres to addons:far:dynpres*1000.
-        local vel to ship:obt:velocity:surface:mag.
-        local r_cons to 287.053.
-        // Assume ferram uses surface v
-        if dyn_pres > 0 {
-            print "Temperature based on Q: " + round(alt_pressure*vel^2/(2*r_cons*dyn_pres),1) + "   " at(0,19).
-        }
-        if drag > 0 {
-            print "Temperature based on drag: " + round(alt_pressure*vel^2*addons:far:cd*11.262/(r_cons*2*drag), 1) + "   " at(0,20).
-        }
-    }
+    local lock burn_time to timeToBurn(ship:airspeed, sl_isp, ship:mass*1000, 1).
 
     //// Slow down at the given altitude
-    //clearscreen.
-    //print "Reentry Program".
-    //wait until impact_time < burn_time.
-    //lock steering to ship:srfretrograde.
+    clearscreen.
+    print "Reentry Program".
+    wait until impact_time < burn_time.
+    print "Angle Discrepency: " + vang(kerbin:position, pos_list[pos_list:length-1]).
+    lock steering to ship:srfretrograde.
     //// Locks throttle to target velocity of 20 m/s
     lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
-    //wait until ship:airspeed < 25.
-    //lock steering to up.
-    //wait until ship:altitude - ship:geoposition:terrainheight < 50.
+    wait until ship:airspeed < 25.
+    lock steering to up.
+    wait until ship:altitude - ship:geoposition:terrainheight < 50.
     //// Locks throttle to target velocity of 5 m/s
-    //lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
+    lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
     //lock steering to up.
-    //wait until ship:altitude - ship:geoposition:terrainheight < 5.
-    //lock throttle to 0.
-    //wait 1.
-    //clearscreen.
-    //print "Landed!".
+    wait until ship:altitude - ship:geoposition:terrainheight < 15.
+    lock throttle to 0.
+    wait 1.
+    clearscreen.
+    print "Landed!".
 }
 
 lock twr_throttle to min(1, max(0, tgt_twr * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrustat(kerbin:atm:altitudepressure(ship:altitude)) * 1000))).  // A throttle ratio [0,1] that provides target TWR
@@ -457,10 +469,6 @@ stage.  // Deploy payload fairing
 clearscreen.
 print "Payload fairing separation.".
 orbitalInsertion().
-deorbit().
+fineTuneOrbit().
+calculateReturnTrajectory().
 landingBurn().
-
-// TODO
-
-// Make better debug menu for reentry
-// Make a landing script=
