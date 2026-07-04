@@ -62,21 +62,15 @@ set avg_cd to avg_cd / read_lex:length.
 function fineTuneOrbit {
     // Zeros the inclination and eccentricity of the orbit
 
+    // Circularize
     rcs on.
     local lock orbital_vel to ship:obt:velocity:orbit.
     local lock tgt_vel to sqrt(kerbin:mu/kerbin:position:mag) * heading(90,0):forevector.
-    local lock delta_v to tgt_vel - orbital_vel.
-    local burn_vec to equatorial_normal.  // Just needs to be initalized somewhere the ship isn't facing
+    local lock burn_vec to tgt_vel - orbital_vel.
     lock steering to burn_vec.
-    until vang(ship:facing:forevector, burn_vec) < 0.05 {
-        if delta_v < 0 {
-            set burn_vec to ship:retrograde:forevector.
-        } else {
-            set burn_vec to ship:prograde:forevector.
-        }
-    }
+    wait until vdot(kerbin:position, equatorial_normal) < 0.1 and vang(ship:facing:forevector, burn_vec) < 0.1.
     lock throttle to 1.
-    wait timeToBurn(abs(delta_v), v_isp, ship:mass * 1000, 1).
+    wait timeToBurn(burn_vec:mag, v_isp, ship:mass * 1000, 1).
     lock throttle to 0.
 }
 
