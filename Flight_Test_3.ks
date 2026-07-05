@@ -68,7 +68,10 @@ function fineTuneOrbit {
     local lock tgt_vel to sqrt(kerbin:mu/kerbin:position:mag) * heading(90,0):forevector.
     local lock burn_vec to tgt_vel - orbital_vel.
     lock steering to burn_vec.
-    wait until vdot(kerbin:position, equatorial_normal) < 0.1 and vang(ship:facing:forevector, burn_vec) < 0.1.
+    until vdot(kerbin:position, equatorial_normal) < 0.1 and vang(ship:facing:forevector, burn_vec) < 0.1 {
+        print "vdot: " + vdot(kerbin:position, equatorial_normal).
+        wait 1.
+    }
     lock throttle to 1.
     wait timeToBurn(burn_vec:mag, v_isp, ship:mass * 1000, 1).
     lock throttle to 0.
