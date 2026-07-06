@@ -87,7 +87,8 @@ function fineTuneOrbit {
         print "lat: " + round(abs(90-vang(equatorial_normal, kerbin:position)),3) at(0,2).
     }
     lock throttle to 1.
-    wait timeToBurn(burn_vec:mag, v_isp, ship:mass * 1000, 2).
+    //wait timeToBurn(burn_vec:mag, v_isp, ship:mass * 1000, 1).
+    wait until burn_vec:mag < 0.5.
 
     lock throttle to 0.
     rcs off.
@@ -334,7 +335,7 @@ function calculateReturnTrajectory {
     // Parameters
     local n to 0.  // Index
     local t to 0.  // Time in s
-    local step to 1.  // KSP tries to do a physics update 50 times a second.
+    local step to 0.2.  // KSP tries to do a physics update 50 times a second.
 
     // Inital conditions
     local m_final to massAfterBurn(deltav, v_isp, ship:mass * 1000).
