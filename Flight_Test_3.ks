@@ -22,7 +22,7 @@ set hover_alt to 7000.  // Altitude in m at which the hoverslam will begin
 set ref_area to 11.262.  // Cross-sectional reference area in m^2
 
 set launchpad to ship:geoposition.  // Geocoordinates structure to help navigation back to launchpad
-set equatorial_normal to heading(0,0):forevector.  // Unit vector normal to the equatorial plane and pointing towards the north pole
+set equatorial_normal to v(0,1,0).  // Unit vector normal to the equatorial plane and pointing towards the north pole
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s, calculated when booster_engines list is created. Note: value is always negative
 
 // Lists and lexicons
@@ -62,19 +62,35 @@ set avg_cd to avg_cd / read_lex:length.
 function fineTuneOrbit {
     // Zeros the inclination and eccentricity of the orbit
 
-    // Circularize
-    rcs on.
     local lock orbital_vel to ship:obt:velocity:orbit.
     local lock tgt_vel to sqrt(kerbin:mu/kerbin:position:mag) * heading(90,0):forevector.
     local lock burn_vec to tgt_vel - orbital_vel.
-    lock steering to burn_vec.
-    until vdot(kerbin:position, equatorial_normal) < 0.1 and vang(ship:facing:forevector, burn_vec) < 0.1 {
-        print "vdot: " + vdot(kerbin:position, equatorial_normal).
+
+    if vdot(kerbin:position, equatorial_normal) > 0 {
+        lock steering to heading(180,0).
+    } else {
+        lock steering to heading(0,0).
+    }
+
+    // Wait to adjust attitude until close to node
+    clearscreen.
+    until abs(vdot(kerbin:position, equatorial_normal)) / (kerbin:position:mag * sin(ship:obt:inclination)) < 0.3 {
+        print "vdot: " + round(abs(vdot(kerbin:position, equatorial_normal)) / (kerbin:position:mag * sin(ship:obt:inclination)),2) at(0,1).
+        print "lat: " + round(abs(90-vang(equatorial_normal, kerbin:position)),2) at(0,2).
         wait 1.
     }
+    
+    // Burn
+    rcs on.
+    lock steering to burn_vec.
+    until abs(90-vang(equatorial_normal, kerbin:position)) < 0.0001 and vang(ship:facing:forevector, burn_vec) < 0.1 {
+        print "lat: " + round(abs(90-vang(equatorial_normal, kerbin:position)),3) at(0,2).
+    }
     lock throttle to 1.
-    wait timeToBurn(burn_vec:mag, v_isp, ship:mass * 1000, 1).
+    wait timeToBurn(burn_vec:mag, v_isp, ship:mass * 1000, 2).
+
     lock throttle to 0.
+    rcs off.
 }
 
 function projectOntoEquatorialPlane {
@@ -381,13 +397,10 @@ function calculateReturnTrajectory {
     print "Ship rot angle: " + ship_theta at(0,1).
     print "Kerbin rot angle: " + kerbin_theta at(0,2).
 
+    rcs on.
     lock steering to ship:retrograde.
 
-    until abs(ship:longitude - (launchpad:lng + ship_theta)) < 0.1. {
-        print "Current Lng: " + round(ship:longitude, 1) + "   " at(0,4).
-        print "Target Lng: " + round(launchpad:lng + ship_theta, 1) + "   " at(0,5).
-        wait 0.
-    }
+    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta)) < 0.1.
 
     local wait_time to timeToBurn(deltav, v_isp, ship:mass * 1000, 1).
     lock throttle to 1.
@@ -417,8 +430,6 @@ function landingBurn {
     rcs on.
     brakes on.
     lock steering to ship:srfretrograde.
-    wait until ship:altitude < 70000.
-    rcs off.
 
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
@@ -431,8 +442,20 @@ function landingBurn {
     //// Slow down at the given altitude
     clearscreen.
     print "Reentry Program".
-    wait until impact_time < burn_time.
-    print "Angle Discrepency: " + vang(kerbin:position, pos_list[pos_list:length-1]).
+    local t to 0.
+    local reference to kerbin:position.
+    until impact_time < burn_time {
+        if ship:altitude < 70000 {
+            rcs off.
+        }
+        print "T: " + round(t,1) + "   " at(0,1).
+        print "Expected Alt: " + round(pos_list[t]:mag,1) + "   " at(0,2).
+        print "Expected Vel: " + round(vel_list[t]:mag,1) + "   " at(0,3).
+        print "Expected Theta: " + round(vang(pos_list[t], reference),1) + "   " at(0,3).
+        print "Current Theta: " + round(vang(kerbin:position, reference),1) + "   " at(0,4).
+        set t to t + 1.
+        wait 1.
+    }
     lock steering to ship:srfretrograde.
     //// Locks throttle to target velocity of 20 m/s
     lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
