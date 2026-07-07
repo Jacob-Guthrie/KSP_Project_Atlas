@@ -18,7 +18,7 @@ stage.  // Start booster engines
 // Flight parameters
 set tgt_altitude to 80000.  // Target orbital altitude in m
 set tgt_twr to 1.1.  // Initial takeoff TWR
-set hover_alt to 7000.  // Altitude in m at which the hoverslam will begin
+set hover_alt to 15000.  // Altitude in m at which the hoverslam will begin
 set ref_area to 11.262.  // Cross-sectional reference area in m^2
 
 set launchpad to ship:geoposition.  // Geocoordinates structure to help navigation back to launchpad
@@ -88,7 +88,7 @@ function fineTuneOrbit {
     }
     lock throttle to 1.
     //wait timeToBurn(burn_vec:mag, v_isp, ship:mass * 1000, 1).
-    wait until burn_vec:mag < 0.5.
+    wait until burn_vec:mag < 1.
 
     lock throttle to 0.
     rcs off.
@@ -335,7 +335,7 @@ function calculateReturnTrajectory {
     // Parameters
     local n to 0.  // Index
     local t to 0.  // Time in s
-    local step to 0.2.  // KSP tries to do a physics update 50 times a second.
+    local step to 0.5.  // KSP tries to do a physics update 50 times a second.
 
     // Inital conditions
     local m_final to massAfterBurn(deltav, v_isp, ship:mass * 1000).
@@ -401,7 +401,7 @@ function calculateReturnTrajectory {
     rcs on.
     lock steering to ship:retrograde.
 
-    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta)) < 0.1.
+    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta)) < 0.01.
 
     local wait_time to timeToBurn(deltav, v_isp, ship:mass * 1000, 1).
     lock throttle to 1.
@@ -435,7 +435,7 @@ function landingBurn {
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
     // 0 = y0 - vertical_speed*t - g/2*t^2
-    local lock impact_time to (-1*ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude - hover_alt))) / -9.81.
+    local lock impact_time to (-1*ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude))) / -9.81.
 
     // Calculate the burn time to negate air speed.
     local lock burn_time to timeToBurn(ship:airspeed, sl_isp, ship:mass*1000, 1).
@@ -444,16 +444,13 @@ function landingBurn {
     clearscreen.
     print "Reentry Program".
     local t to 0.
-    local reference to kerbin:position.
     until impact_time < burn_time {
         if ship:altitude < 70000 {
             rcs off.
         }
         print "T: " + round(t,1) + "   " at(0,1).
-        print "Expected Alt: " + round(pos_list[t]:mag,1) + "   " at(0,2).
-        print "Expected Vel: " + round(vel_list[t]:mag,1) + "   " at(0,3).
-        print "Expected Theta: " + round(vang(pos_list[t], reference),1) + "   " at(0,3).
-        print "Current Theta: " + round(vang(kerbin:position, reference),1) + "   " at(0,4).
+        print "Expected Alt: " + round(pos_list[t*2]:mag-kerbin:radius,1) + "   " at(0,2).
+        print "Expected Vel: " + round(vel_list[t*2]:mag,1) + "   " at(0,3).
         set t to t + 1.
         wait 1.
     }
