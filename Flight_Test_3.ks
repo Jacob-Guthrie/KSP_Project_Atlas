@@ -459,6 +459,7 @@ function calculateReturnTrajectory {
     local m_final to massAfterBurn(deltav, v_isp, ship:mass * 1000).
     global pos_list to list().
     global vel_list to list().
+    global drag_list to list().
     pos_list:add(kerbin:position).
     vel_list:add(deorbit_vel * ship:prograde:forevector).
 
@@ -482,8 +483,8 @@ function calculateReturnTrajectory {
     until pos_list[n]:mag - kerbin:radius < hover_alt {
         // Readout
         print "Loop #: " + (n+1) at(0,6).
-        print "Alt: " + (pos_list[n]:mag - kerbin:radius) + " " at(0,7).
-        print "Vel mag: " + vel_list[n]:mag + " " at(0,8).
+        print "Altitude: " + (pos_list[n]:mag - kerbin:radius) + " " at(0,7).
+        print "Velocity: " + vel_list[n]:mag + " " at(0,8).
         print "Drag: " + F_drag(pos_list[n], vel_list[n], sun:position):mag at (0,9).
 
         // drdt = f(vel)
@@ -504,6 +505,7 @@ function calculateReturnTrajectory {
         // Iterate
         pos_list:add(pos_list[n] + step/6 * (pos_k1 + 2*pos_k2 + 2*pos_k3 + pos_k4)).
         vel_list:add(vel_list[n] + step/6 * (vel_k1 + 2*vel_k2 + 2*vel_k3 + vel_k4)).
+        drag_list:add(F_drag(pos_list[n], vel_list[n], sun:position):mag).
         set t to t+step.
         set n to n+1.
     }
@@ -519,7 +521,7 @@ function calculateReturnTrajectory {
     rcs on.
     lock steering to ship:retrograde.
 
-    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta + 5)) < 0.01.
+    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta + 10)) < 0.01.
 
     local wait_time to timeToBurn(deltav, v_isp, ship:mass * 1000, 1).
     lock throttle to 1.
@@ -550,6 +552,42 @@ function landingBurn {
     brakes on.
     lock steering to ship:srfretrograde.
 
+    local t to 0.
+
+    clearscreen.
+    print "Reentry Program".
+    until ship:altitude < 70000 {
+        print "T: " + t at(0,1).
+        set t to t+1.
+        wait 1.
+    }
+    rcs off.
+      // Aproximately 1 km away from launchpad
+    until abs(ship:latitude - launchpad:lng) < 0.1 {
+        print "T: " + t at(0,1).
+        print "Alt:  " + round(ship:altitude,1) + "   " + round(pos_list[t]:mag - kerbin:radius,1) at(0,2).
+        print "Vel:  " + round(ship:obt:velocity:orbit:mag,1) + "   " + round(vel_list[t]:mag,1) at(0,3).
+        print "Drag: " + round(F_Drag(kerbin:position, ship:obt:velocity:orbit, sun:position),1) + "   " + round(drag_list[t],1) at(0,4).
+        set t to t+1.
+        wait 1.
+    }
+    lock throttle to 1.
+    wait until vang(ship:retrograde:forevector, up:forevector) < 5.
+    local lock direction_correction_vector to launchpad:position:normalized - ship:obt:velocity:surface:normalized.
+    local lock steer_scale to min(5, 5 / 0.09 * direction_correction_vector:mag).
+    lock steering to heading(direction_correction_vector, 90-steer_scale).
+    lock throttle to min(1, max(0, (1/100 * ship:airspeed - 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
+    wait until ship:altitude < 100.
+    lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
+    lock steering to up.
+    wait until ship:altitude < 7.
+    lock throttle to 0.
+
+
+
+    
+   
+
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
     // 0 = y0 - vertical_speed*t - g/2*t^2
@@ -559,10 +597,7 @@ function landingBurn {
     //local lock burn_time to timeToBurn(ship:airspeed, sl_isp, ship:mass*1000, 1).
 
     //// Slow down at the given altitude
-    clearscreen.
-    print "Reentry Program".
-    wait until ship:altitude < 70000.
-    rcs off.
+
     //wait until impact_time < burn_time.
     //// Locks throttle to target velocity of 20 m/s
     //lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
