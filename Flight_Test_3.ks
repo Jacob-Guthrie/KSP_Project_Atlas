@@ -345,16 +345,17 @@ function integrateReturnTrajectory{
     local deltav to ship:obt:velocity:orbit:mag - deorbit_velocity.
 
     // Initial conditions
-    global pos_list to list().
-    global vel_list to list().
+    local pos_list to list().
+    local vel_list to list().
     pos_list:add(kerbin:position).
     vel_list:add(deorbit_velocity * ship:prograde:forevector).
     local mass_final to massAfterBurn(deltav, v_isp, ship:mass * 1000).
 
     // Parameters
     local n to 0.  // Index
+    local t to 0.  // Time elapsed in s
     local step to 1.  // Initial step size
-    local tolerance to 1000.  // Tolerance
+    local tolerance to 1.  // Tolerance
 
        // RK-45
     until pos_list[n]:mag - kerbin:radius < hover_alt {
@@ -404,11 +405,31 @@ function integrateReturnTrajectory{
             pos_list:add(pos7).
             vel_list:add(vel7).
             set n to n+1.
+            set t to t+step.
         }
         if not error = 0. {
-            set step to 0.9 * step * (tolerance/error)^(1/5).
+            set step to min(0.9 * step * (tolerance/error)^(1/5), 1).
         }
     }
+
+    // Deorbit
+    local ship_theta to vang(pos_list[0], pos_list[n]).
+    local kerbin_theta to t * kerbin:angularvel:mag * 180 / constant:pi.
+
+    clearscreen.
+    print "Tracjetory set!" at(0,0).
+    print "Ship rot angle: " + ship_theta at(0,1).
+    print "Kerbin rot angle: " + kerbin_theta at(0,2).
+
+    rcs on.
+    lock steering to ship:retrograde.
+
+    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta)) < 0.01.
+
+    local wait_time to timeToBurn(deltav, v_isp, ship:mass * 1000, 1).
+    lock throttle to 1.
+    wait wait_time.
+    lock throttle to 0.
 }
 
 function calculateReturnTrajectory {
@@ -432,7 +453,7 @@ function calculateReturnTrajectory {
     // Parameters
     local n to 0.  // Index
     local t to 0.  // Time in s
-    local step to 0.5.  // KSP tries to do a physics update 50 times a second.
+    local step to 1.  // KSP tries to do a physics update 50 times a second.
 
     // Inital conditions
     local m_final to massAfterBurn(deltav, v_isp, ship:mass * 1000).
@@ -498,7 +519,7 @@ function calculateReturnTrajectory {
     rcs on.
     lock steering to ship:retrograde.
 
-    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta)) < 0.01.
+    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta + 5)) < 0.01.
 
     local wait_time to timeToBurn(deltav, v_isp, ship:mass * 1000, 1).
     lock throttle to 1.
@@ -532,39 +553,30 @@ function landingBurn {
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
     // 0 = y0 - vertical_speed*t - g/2*t^2
-    local lock impact_time to (-1*ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude))) / -9.81.
+    //local lock impact_time to (-1*ship:verticalspeed - sqrt((ship:verticalspeed)^2 + 2*9.81*(ship:altitude))) / -9.81.
 
     // Calculate the burn time to negate air speed.
-    local lock burn_time to timeToBurn(ship:airspeed, sl_isp, ship:mass*1000, 1).
+    //local lock burn_time to timeToBurn(ship:airspeed, sl_isp, ship:mass*1000, 1).
 
     //// Slow down at the given altitude
     clearscreen.
     print "Reentry Program".
-    local t to 0.
-    until impact_time < burn_time {
-        if ship:altitude < 70000 {
-            rcs off.
-        }
-        print "T: " + round(t,1) + "   " at(0,1).
-        print "Expected Alt: " + round(pos_list[t*2]:mag-kerbin:radius,1) + "   " at(0,2).
-        print "Expected Vel: " + round(vel_list[t*2]:mag,1) + "   " at(0,3).
-        set t to t + 1.
-        wait 1.
-    }
-    lock steering to ship:srfretrograde.
+    wait until ship:altitude < 70000.
+    rcs off.
+    //wait until impact_time < burn_time.
     //// Locks throttle to target velocity of 20 m/s
-    lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
-    wait until ship:airspeed < 25.
-    lock steering to up.
-    wait until ship:altitude - ship:geoposition:terrainheight < 50.
-    //// Locks throttle to target velocity of 5 m/s
-    lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
+    //lock throttle to min(1, max(0, ((ship:airspeed - 20) / 4.2 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
+    //wait until ship:airspeed < 25.
     //lock steering to up.
-    wait until ship:altitude - ship:geoposition:terrainheight < 15.
-    lock throttle to 0.
-    wait 1.
-    clearscreen.
-    print "Landed!".
+    //wait until ship:altitude - ship:geoposition:terrainheight < 50.
+    //// Locks throttle to target velocity of 5 m/s
+    //lock throttle to min(1, max(0, ((ship:airspeed - 5) / 0.83 + 1) * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrust * 1000))).
+    //lock steering to up.
+    //wait until ship:altitude - ship:geoposition:terrainheight < 15.
+    //lock throttle to 0.
+    //wait 1.
+    //clearscreen.
+    //print "Landed!".
 }
 
 lock twr_throttle to min(1, max(0, tgt_twr * F_gravity(kerbin:position, ship:mass * 1000):mag / (ship:maxthrustat(kerbin:atm:altitudepressure(ship:altitude)) * 1000))).  // A throttle ratio [0,1] that provides target TWR
@@ -585,5 +597,5 @@ clearscreen.
 print "Payload fairing separation.".
 orbitalInsertion().
 fineTuneOrbit().
-integrateReturnTrajectory().
+calculateReturnTrajectory().
 landingBurn().
