@@ -27,6 +27,7 @@ set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s, calculated whe
 
 // Lists and lexicons
 
+// Create a list of booster_engines and initialize associated variables
 set booster_engines to list().  // List of booster engines
 // Populate booster_engines list and measure max mass outflow rate
 set max_mass_outflow to 0.  // Maximum fuel outflow rate in kg/s
@@ -54,6 +55,8 @@ until read_index = -1 {
     set read_index to read_index - 1.
 }
 set avg_cd to avg_cd / read_lex:length.
+// Butcher Tableu for RK-45
+
 
 //
 //   Functions
@@ -314,6 +317,100 @@ function deployPayload {
     rcs off.
 }
 
+function integrateReturnTrajectory{
+    // Uses RK45 to model the return trajectory to the surface then executes a precise deorbiting burn
+
+    clearscreen.
+    print "Calculate return trajectory...".
+
+    // Differential equations
+    local function drdt {
+        // dr/dt = -v
+        parameter velocity_arg.  // Velocity vector in m/s
+
+        return -1 * velocity_arg.
+    }
+
+    local function dvdt {
+        // dv/dt = (F_gravity + F_drag) / m
+        parameter position_arg.  // Position vector in m
+        parameter velocity_arg.  // Velocity vector in m/s
+
+        return (F_gravity(position_arg, mass_final) + F_drag(position_arg, velocity_arg, sun:position)) / mass_final.
+    }
+
+    // Calculate decaying orbit
+    local deorbit_semimajoraxis to (kerbin:position:mag + kerbin:radius + 52000) / 2.
+    local deorbit_velocity to sqrt(kerbin:mu * ( 2 / kerbin:position:mag - 1/deorbit_semimajoraxis)).
+    local deltav to ship:obt:velocity:orbit:mag - deorbit_velocity.
+
+    // Initial conditions
+    global pos_list to list().
+    global vel_list to list().
+    pos_list:add(kerbin:position).
+    vel_list:add(deorbit_velocity * ship:prograde:forevector).
+    local mass_final to massAfterBurn(deltav, v_isp, ship:mass * 1000).
+
+    // Parameters
+    local n to 0.  // Index
+    local step to 1.  // Initial step size
+    local tolerance to 1000.  // Tolerance
+
+       // RK-45
+    until pos_list[n]:mag - kerbin:radius < hover_alt {
+        // drdt = f(vel)
+        // dvdt = f(pos, vel)
+        print "Loop #: " + (n+1) + "   " at(0,1).
+        print "Step size: " + step + "                " at(0,2).
+        print "Expected Altitude: " + round(pos_list[n]:mag - kerbin:radius) + "  " at(0,3).
+        print "Expected Velocity: " + round(vel_list[n]:mag, 1) + "   " at(0,4).
+
+        local pos_k1 to drdt(vel_list[n]).
+        local vel_k1 to dvdt(pos_list[n], vel_list[n]).
+
+        local pos2 to pos_list[n] + step * pos_k1 * 1/5.
+        local vel2 to vel_list[n] + step * vel_k1 * 1/5.
+        local pos_k2 to drdt(vel2).
+        local vel_k2 to dvdt(pos2, vel2).
+
+        local pos3 to pos_list[n] + step * (3/40 * pos_k1 + 9/40 * pos_k2).
+        local vel3 to vel_list[n] + step * (3/40 * vel_k1 + 9/40 * vel_k2).
+        local pos_k3 to drdt(vel3).
+        local vel_k3 to dvdt(pos3, vel3).
+        
+        local pos4 to pos_list[n] + step * (44/45 * pos_k1 - 56/15 * pos_k2 + 32/9 * pos_k3).
+        local vel4 to vel_list[n] + step * (44/45 * vel_k1 - 56/15 * vel_k2 + 32/9 * vel_k3).
+        local pos_k4 to drdt(vel4).
+        local vel_k4 to dvdt(pos4, vel4).
+        
+        local pos5 to pos_list[n] + step * (19372/6561 * pos_k1 - 25360/2187 * pos_k2 + 64448/6561 * pos_k3 - 212/729 * pos_k4).
+        local vel5 to vel_list[n] + step * (19372/6561 * vel_k1 - 25360/2187 * vel_k2 + 64448/6561 * vel_k3 - 212/729 * vel_k4).
+        local pos_k5 to drdt(vel5).
+        local vel_k5 to dvdt(pos5, vel5).        
+
+        local pos6 to pos_list[n] + step * (9017/3168 * pos_k1 - 355/33 * pos_k2 + 46732/5247 * pos_k3 + 49/176 * pos_k4 - 5103/18656 * pos_k5).
+        local vel6 to vel_list[n] + step * (9017/3168 * vel_k1 - 355/33 * vel_k2 + 46732/5247 * vel_k3 + 49/176 * vel_k4 - 5103/18656 * vel_k5).
+        local pos_k6 to drdt(vel6).
+        local vel_k6 to dvdt(pos6, vel6).
+
+        local pos7 to pos_list[n] + step * (35/384 * pos_k1 + 500/1113 * pos_k3 + 125/192 * pos_k4 - 2187/6784 * pos_k5 + 11/84 * pos_k6).
+        local vel7 to vel_list[n] + step * (35/384 * vel_k1 + 500/1113 * vel_k3 + 125/192 * vel_k4 - 2187/6784 * vel_k5 + 11/84 * vel_k6).
+        local pos_k7 to drdt(vel7).
+
+        // Check error
+        local pos_rk4_estimate to pos_list[n] + step * (5179/57600 * pos_k1 + 7571/16695 * pos_k3 + 393/640 * pos_k4 - 92097/339200 * pos_k5 + 187/2100 * pos_k6 + 1/40 * pos_k7).
+        local error to (pos7 - pos_rk4_estimate):mag.
+        if error < tolerance {
+            pos_list:add(pos7).
+            vel_list:add(vel7).
+            set n to n+1.
+        }
+        if not error = 0. {
+            set step to 0.9 * step * (tolerance/error)^(1/5).
+        }
+    }
+}
+
 function calculateReturnTrajectory {
     // Calculates the return trajectory and executes a precise deorbiting burn
     // Uses the 4th order Runge-Kutta method to model the return trajectory for the booster
@@ -488,5 +585,5 @@ clearscreen.
 print "Payload fairing separation.".
 orbitalInsertion().
 fineTuneOrbit().
-calculateReturnTrajectory().
+integrateReturnTrajectory().
 landingBurn().
