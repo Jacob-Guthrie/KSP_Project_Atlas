@@ -5,6 +5,6 @@ Optimize gravity turn?
 Landing script
 
 
-
+Test the system of differential equations for butterfly effect
 
 For drag calculations

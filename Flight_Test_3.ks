@@ -591,13 +591,13 @@ function landingBurn {
     }
     clearscreen.
     local average_drag_error to 0.
-    for i in drag_error_list {
+    for i in drag_error_list:values {
         set average_drag_error to average_drag_error + drag_error_list[i].
     }
     set average_drag_error to average_drag_error / drag_error_list:length.
     print "Average drag error: " + (average_drag_error).
     writejson(drag_error_list, "drag_error_lex.json").
-    lock throttle to 1.
+    lock throttle to 1. 
     wait until vang(ship:retrograde:forevector, up:forevector) < 5.
     local lock direction_correction_vector to launchpad:position:normalized - ship:obt:velocity:surface:normalized.
     local lock steer_scale to min(5, 5 / 0.09 * direction_correction_vector:mag).
@@ -608,7 +608,6 @@ function landingBurn {
     lock steering to up.
     wait until ship:altitude < 7.
     lock throttle to 0.
-s
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
     // 0 = y0 - vertical_speed*t - g/2*t^2
