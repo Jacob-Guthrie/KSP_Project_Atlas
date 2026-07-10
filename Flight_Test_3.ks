@@ -18,7 +18,7 @@ stage.  // Start booster engines
 // Flight parameters
 set tgt_altitude to 80000.  // Target orbital altitude in m
 set tgt_twr to 1.1.  // Initial takeoff TWR
-set hover_alt to 10000.  // Altitude in m at which the hoverslam will begin
+set hover_alt to 25000.  // Altitude in m at which the hoverslam will begin
 set ref_area to 11.262.  // Cross-sectional reference area in m^2
 
 set launchpad to ship:geoposition.  // Geocoordinates structure to help navigation back to launchpad
@@ -446,7 +446,7 @@ function calculateReturnTrajectory {
     // Use the vis-viva equation to determine the deltav of a deorbiting burn targeting a periapsis of 50km
     // v^2 = mu * (2/r - 1/a)
     // a = (2*body radius + apoapsis + periapsis)/2
-    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 55000) / 2.
+    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 52000) / 2.
     local deorbit_vel to sqrt(kerbin:mu * (2/kerbin:position:mag - 1/deorbit_semimajor_axis)).  // The velocity required to deorbit
     local deltav to ship:obt:velocity:orbit:mag - deorbit_vel.  // The delta-v for a deorbiting burn
 
@@ -528,7 +528,7 @@ function calculateReturnTrajectory {
     rcs on.
     lock steering to ship:retrograde.
 
-    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta + 25)) < 0.01.
+    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta + 15)) < 0.01.
 
     local wait_time to timeToBurn(deltav, v_isp, ship:mass * 1000, 1).
     lock throttle to 1.
@@ -577,8 +577,8 @@ function landingBurn {
         // Collect flight data
         local drag_actual to addons:far:aeroforce:mag * 1000.
         local drag_pred to F_Drag(kerbin:position, ship:obt:velocity:orbit, sun:position):mag.
-        global drag_error_list to list().
-        drag_error_list:add(drag_actual - drag_pred).
+        global drag_error_list to lexicon().
+        set drag_error_list[ship:altitude] to drag_actual - drag_pred.
 
         print "T: " + t + "   " at(0,1).
         if t < pos_list:length - 1. {
@@ -596,6 +596,7 @@ function landingBurn {
     }
     set average_drag_error to average_drag_error / drag_error_list:length.
     print "Average drag error: " + (average_drag_error).
+    writejson(drag_error_list, "drag_error_lex.json").
     lock throttle to 1.
     wait until vang(ship:retrograde:forevector, up:forevector) < 5.
     local lock direction_correction_vector to launchpad:position:normalized - ship:obt:velocity:surface:normalized.
@@ -607,7 +608,7 @@ function landingBurn {
     lock steering to up.
     wait until ship:altitude < 7.
     lock throttle to 0.
-
+s
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts
     // 0 = y0 - vertical_speed*t - g/2*t^2
