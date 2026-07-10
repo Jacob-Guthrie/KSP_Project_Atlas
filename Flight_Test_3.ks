@@ -18,7 +18,7 @@ stage.  // Start booster engines
 // Flight parameters
 set tgt_altitude to 80000.  // Target orbital altitude in m
 set tgt_twr to 1.1.  // Initial takeoff TWR
-set hover_alt to 15000.  // Altitude in m at which the hoverslam will begin
+set hover_alt to 10000.  // Altitude in m at which the hoverslam will begin
 set ref_area to 11.262.  // Cross-sectional reference area in m^2
 
 set launchpad to ship:geoposition.  // Geocoordinates structure to help navigation back to launchpad
@@ -55,8 +55,6 @@ until read_index = -1 {
     set read_index to read_index - 1.
 }
 set avg_cd to avg_cd / read_lex:length.
-// Butcher Tableu for RK-45
-
 
 //
 //   Functions
@@ -77,7 +75,7 @@ function fineTuneOrbit {
 
     // Wait to adjust attitude until close to node
     clearscreen.
-    until abs(vdot(kerbin:position, equatorial_normal)) / (kerbin:position:mag * sin(ship:obt:inclination)) < 0.3 {
+    until abs(vdot(kerbin:position, equatorial_normal)) / (kerbin:position:mag * sin(ship:obt:inclination)) < 0.5 {
         print "vdot: " + round(abs(vdot(kerbin:position, equatorial_normal)) / (kerbin:position:mag * sin(ship:obt:inclination)),2) at(0,1).
         print "lat: " + round(abs(90-vang(equatorial_normal, kerbin:position)),2) at(0,2).
         wait 1.
@@ -140,11 +138,19 @@ function getAtmTemperature {
 function interpolate {
     // Performs linear interpolation on a lexicon to return a value based on a lookup value
     parameter lex_arg.  // Lexicon to evaluate
-    parameter lookup_value.  // Value to lookup (x)
+    parameter lookup_key.  // Value to lookup (x)
 
     local i to lex_arg:length - 1.
+    // Check for out of bounds key value
+    if lookup_key > lex_arg:keys[i] {
+            return lex_arg[lex_arg:keys[i]].  // Returns the value of the higest key
+    }
+    if lookup_key < lex_arg:keys[0] {
+        return lex_arg[lex_arg:keys[0]].  // Returns the value of the lowest key
+    }
     // Search the lexicon keys in reverse until a key is less than the lookup value
-    until lex_arg:keys[i] < lookup_value {
+    until lex_arg:keys[i] < lookup_key {
+
         set i to i - 1.
     }
     local lo_key to lex_arg:keys[i].  // Key of the low endpoint (x1)
@@ -153,7 +159,7 @@ function interpolate {
     local hi_endpoint to lex_arg[hi_key].  // Value of the high endpoint (y2)
 
     // y = (y2 - y1) * (x - x1) / (x2 - x1) + y1
-    return (hi_endpoint - lo_endpoint) * (lookup_value - lo_key) / (hi_key - lo_key) + lo_endpoint.
+    return (hi_endpoint - lo_endpoint) * (lookup_key - lo_key) / (hi_key - lo_key) + lo_endpoint.
 }
 
 function F_gravity {
@@ -191,11 +197,12 @@ function F_drag {
     local relative_vel to velocity_arg - srf_vel.
 
     // Calculate mach number and interpolate drag coefficient
-    local c_drag to avg_cd.
+    //local c_drag to avg_cd.
     local mach to relative_vel:mag / sqrt(1.4*287.053*atm_temp).
-    if cd_lex:haskey(round(mach, 1)) {
-        set c_drag to cd_lex[round(mach, 1)].
-    }
+    //if cd_lex:haskey(round(mach, 1)) {
+    //    set c_drag to cd_lex[round(mach, 1)].
+    //}
+    local c_drag to interpolate(cd_lex,mach).
 
     return 0.5 * density * relative_vel:mag^2 * c_drag * ref_area * -1 * relative_vel:normalized.
 }
@@ -439,7 +446,7 @@ function calculateReturnTrajectory {
     // Use the vis-viva equation to determine the deltav of a deorbiting burn targeting a periapsis of 50km
     // v^2 = mu * (2/r - 1/a)
     // a = (2*body radius + apoapsis + periapsis)/2
-    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 52000) / 2.
+    local deorbit_semimajor_axis to (2 * kerbin:radius + ship:obt:semimajoraxis - kerbin:radius + 55000) / 2.
     local deorbit_vel to sqrt(kerbin:mu * (2/kerbin:position:mag - 1/deorbit_semimajor_axis)).  // The velocity required to deorbit
     local deltav to ship:obt:velocity:orbit:mag - deorbit_vel.  // The delta-v for a deorbiting burn
 
@@ -505,7 +512,7 @@ function calculateReturnTrajectory {
         // Iterate
         pos_list:add(pos_list[n] + step/6 * (pos_k1 + 2*pos_k2 + 2*pos_k3 + pos_k4)).
         vel_list:add(vel_list[n] + step/6 * (vel_k1 + 2*vel_k2 + 2*vel_k3 + vel_k4)).
-        drag_list:add(F_drag(pos_list[n], vel_list[n], sun:position):mag).
+        drag_list:add(F_drag(pos_list[n], vel_list[n], sun:position)).
         set t to t+step.
         set n to n+1.
     }
@@ -521,7 +528,7 @@ function calculateReturnTrajectory {
     rcs on.
     lock steering to ship:retrograde.
 
-    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta + 10)) < 0.01.
+    wait until abs(ship:longitude - (launchpad:lng + ship_theta + kerbin_theta + 25)) < 0.01.
 
     local wait_time to timeToBurn(deltav, v_isp, ship:mass * 1000, 1).
     lock throttle to 1.
@@ -552,25 +559,43 @@ function landingBurn {
     brakes on.
     lock steering to ship:srfretrograde.
 
-    local t to 0.
+    local origin to timestamp().
+    local lock t to round(time:seconds - origin:seconds).
 
     clearscreen.
     print "Reentry Program".
     until ship:altitude < 70000 {
-        print "T: " + t at(0,1).
-        set t to t+1.
+        print "T: " + t + "   " at(0,1).
+        print "Alt:  " + round(ship:altitude,1) + "   " + round(pos_list[t]:mag - kerbin:radius,1) at(0,2).
+        print "Vel:  " + round(ship:obt:velocity:orbit:mag,1) + "   " + round(vel_list[t]:mag,1) at(0,3).
+        print "Drag: " + round(F_Drag(kerbin:position, ship:obt:velocity:orbit, sun:position):mag,1) + "   " + round(drag_list[t]:mag,1) at(0,4).
         wait 1.
     }
     rcs off.
-      // Aproximately 1 km away from launchpad
-    until abs(ship:latitude - launchpad:lng) < 0.1 {
-        print "T: " + t at(0,1).
-        print "Alt:  " + round(ship:altitude,1) + "   " + round(pos_list[t]:mag - kerbin:radius,1) at(0,2).
-        print "Vel:  " + round(ship:obt:velocity:orbit:mag,1) + "   " + round(vel_list[t]:mag,1) at(0,3).
-        print "Drag: " + round(F_Drag(kerbin:position, ship:obt:velocity:orbit, sun:position),1) + "   " + round(drag_list[t],1) at(0,4).
-        set t to t+1.
+      // Aproximately 1 km away from launchpad 0.1 degrees
+    until abs(ship:longitude - launchpad:lng) < 1 {
+        // Collect flight data
+        local drag_actual to addons:far:aeroforce:mag * 1000.
+        local drag_pred to F_Drag(kerbin:position, ship:obt:velocity:orbit, sun:position):mag.
+        global drag_error_list to list().
+        drag_error_list:add(drag_actual - drag_pred).
+
+        print "T: " + t + "   " at(0,1).
+        if t < pos_list:length - 1. {
+            print "Alt:  " + round(ship:altitude,1) + "   " + round(pos_list[t]:mag - kerbin:radius,1) at(0,2).
+            print "Vel:  " + round(ship:obt:velocity:orbit:mag,1) + "   " + round(vel_list[t]:mag,1) at(0,3).
+            print "Drag: " + round(drag_actual,1) + "   " + round(drag_list[t]:mag,1) at(0,4).
+            print "Drag errr: " + round(drag_actual-drag_pred,1) + "    " at(0,6).
+        }
         wait 1.
     }
+    clearscreen.
+    local average_drag_error to 0.
+    for i in drag_error_list {
+        set average_drag_error to average_drag_error + drag_error_list[i].
+    }
+    set average_drag_error to average_drag_error / drag_error_list:length.
+    print "Average drag error: " + (average_drag_error).
     lock throttle to 1.
     wait until vang(ship:retrograde:forevector, up:forevector) < 5.
     local lock direction_correction_vector to launchpad:position:normalized - ship:obt:velocity:surface:normalized.
@@ -582,11 +607,6 @@ function landingBurn {
     lock steering to up.
     wait until ship:altitude < 7.
     lock throttle to 0.
-
-
-
-    
-   
 
     // Calculate time until hoverslam altitude using simple projectile motion, solves for t with the quadratic formula
     // Note: neglecting drag gives a built in buffer since actual acceleration will be slower than this formula predicts

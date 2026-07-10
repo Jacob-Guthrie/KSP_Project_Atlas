@@ -2,8 +2,9 @@ Write Paper
 
 Optimize gravity turn?
 
-Readout during descent with drag
-
-Add 10 degrees overcorrection
-
 Landing script
+
+
+
+
+For drag calculations
